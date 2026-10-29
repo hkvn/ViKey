@@ -32,6 +32,9 @@ static bool findKeyCode(const Uint32& charCode, const Uint8& code, int& j, int& 
             if (charCode == it->second[z]) {
                 j = it->first;
                 k = z;
+                //TCVN3 uses one code for both cases of a letter with mark: take it as lowercase
+                if (k % 2 == 0 && k + 1 < it->second.size() && it->second[k + 1] == charCode)
+                    k++;
                 return true;
             }//end if
         }
@@ -51,7 +54,7 @@ static Uint16 getUnicodeCompoundMarkIndex(const Uint16& mark) {
 string convertUtil(const string& sourceString) {
     wstring data = utf8ToWideString(sourceString);
     Uint16 t = 0, target;
-    int j, k, p;
+    int j = 0, k = 0, p;
     vector<wchar_t> _temp;
     bool hasBreak = false;
     bool shouldUpperCase = false;
@@ -62,6 +65,10 @@ string convertUtil(const string& sourceString) {
     
     for (int i = 0; i < data.size(); i++) {
         p = 0;
+        bool found = false;
+        //no case option: keep the case of the source char
+        bool toUpperCase = convertToolToAllCaps || shouldUpperCase;
+        bool toLowerCase = !toUpperCase && (convertToolToAllNonCaps || convertToolToCapsFirstLetter || convertToolToCapsEachWord);
         //find char with tone/mark
         if (i < data.size() - 1) {
             switch (convertToolFromCode) {
@@ -84,79 +91,61 @@ string convertUtil(const string& sourceString) {
                     t = (Uint16)data[i];
                     break;
             }
-            
-            if (findKeyCode(t, convertToolFromCode, j, k)) {
-                i += p;
-                target = _codeTable[convertToolToCode][j][k];
-                if ((convertToolToAllCaps || shouldUpperCase) && k % 2 != 0) {
-                    target = _codeTable[convertToolToCode][j][k-1];
-                } else if ((convertToolToAllNonCaps || !shouldUpperCase) && k % 2 == 0) {
-                    target = _codeTable[convertToolToCode][j][k+1];
-                }
-                
-                //remove mark/tone
-                if (convertToolRemoveMark) {
-                    target = keyCodeToCharacter((Uint8)j);
-                    if (convertToolToAllCaps) {
-                        target = towupper(target);
-                    } else if (convertToolToAllNonCaps) {
-                        target = towlower(target);
-                    }
-                }
-                
-                if (convertToolToCode == 0 || convertToolToCode == 1) { //Unicode
-                    _temp.push_back(target);
-                } else if (convertToolToCode == 2 || convertToolToCode == 4) { //VNI, VN Locale 1258
-                    if (HIBYTE(target) > 32) {
-                        _temp.push_back((Uint8)target);
-                        _temp.push_back(target>>8);
-                    } else {
-                        _temp.push_back((Uint8)target);
-                    }
-                } else if (convertToolToCode == 3) { //Unicode Compound
-                    if ((target >> 13) > 0) {
-                        _temp.push_back(target & 0x1FFF);
-                        _temp.push_back(_unicodeCompoundMark[(target>>13) - 1]);
-                    } else {
-                        _temp.push_back(target);
-                    }
-                }
-                shouldUpperCase = false;
-                hasBreak = false;
-                continue;
-            }
+            found = findKeyCode(t, convertToolFromCode, j, k);
         }
-        
-        //find primary keycode first
-        t = (Uint16)data[i];
-        if (findKeyCode(t, convertToolFromCode, j, k)) {
+
+        //then find single char (also the last char)
+        if (!found) {
+            p = 0;
+            t = (Uint16)data[i];
+            found = findKeyCode(t, convertToolFromCode, j, k);
+        }
+
+        if (found) {
+            i += p;
             target = _codeTable[convertToolToCode][j][k];
-            if ((convertToolToAllCaps || shouldUpperCase) && k % 2 != 0) {
+            if (toUpperCase && k % 2 != 0) {
                 target = _codeTable[convertToolToCode][j][k-1];
-            } else if ((convertToolToAllNonCaps || !shouldUpperCase) && k % 2 == 0) {
+            } else if (toLowerCase && k % 2 == 0) {
                 target = _codeTable[convertToolToCode][j][k+1];
             }
-            
+
             //remove mark/tone
             if (convertToolRemoveMark) {
                 target = keyCodeToCharacter((Uint8)j);
-                if (convertToolToAllCaps) {
+                if (toUpperCase || (!toLowerCase && k % 2 == 0)) {
                     target = towupper(target);
-                } else if (convertToolToAllNonCaps){
+                } else {
                     target = towlower(target);
                 }
             }
-            
-            _temp.push_back(target);
+
+            if (convertToolToCode == 0 || convertToolToCode == 1) { //Unicode
+                _temp.push_back(target);
+            } else if (convertToolToCode == 2 || convertToolToCode == 4) { //VNI, VN Locale 1258
+                if (HIBYTE(target) > 32) {
+                    _temp.push_back((Uint8)target);
+                    _temp.push_back(target>>8);
+                } else {
+                    _temp.push_back((Uint8)target);
+                }
+            } else if (convertToolToCode == 3) { //Unicode Compound
+                if ((target >> 13) > 0) {
+                    _temp.push_back(target & 0x1FFF);
+                    _temp.push_back(_unicodeCompoundMark[(target>>13) - 1]);
+                } else {
+                    _temp.push_back(target);
+                }
+            }
             shouldUpperCase = false;
             hasBreak = false;
             continue;
         }
         
         //if dont find => normal char
-        if (convertToolToAllCaps || shouldUpperCase)
+        if (toUpperCase)
             _temp.push_back(towupper(data[i]));
-        else if (convertToolToAllNonCaps || !shouldUpperCase)
+        else if (toLowerCase)
             _temp.push_back(towlower(data[i]));
         else
             _temp.push_back(data[i]);

@@ -92,6 +92,11 @@ static CFRunLoopSourceRef runLoopSource;
     return YES;
 }
 
++(void)reEnableEventTap {
+    if (_isInited)
+        CGEventTapEnable(eventTap, true);
+}
+
 +(NSArray*)getTableCodes {
     return [[NSArray alloc] initWithObjects:
             @"Unicode",

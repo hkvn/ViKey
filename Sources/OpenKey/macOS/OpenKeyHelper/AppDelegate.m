@@ -22,18 +22,14 @@
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     //Check if OpenKey is running for current user (multi-user/Fast User Switching support)
     uid_t currentUID = getuid();
-    NSArray<NSRunningApplication *>* runningApps = [[NSWorkspace sharedWorkspace] runningApplications];
     BOOL isRunning = NO;
 
-    for (NSRunningApplication *app in runningApps) {
-        if ([app.bundleIdentifier isEqualToString:OPENKEY_BUNDLE]) {
-            pid_t pid = app.processIdentifier;
-            struct proc_bsdinfo proc;
-            int size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &proc, sizeof(proc));
-            if (size == sizeof(proc) && proc.pbi_uid == currentUID) {
-                isRunning = YES;
-                break;
-            }
+    for (NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:OPENKEY_BUNDLE]) {
+        struct proc_bsdinfo proc;
+        int size = proc_pidinfo(app.processIdentifier, PROC_PIDTBSDINFO, 0, &proc, sizeof(proc));
+        if (!app.terminated && size == sizeof(proc) && proc.pbi_uid == currentUID) {
+            isRunning = YES;
+            break;
         }
     }
 
@@ -43,6 +39,9 @@
             path = [path stringByDeletingLastPathComponent];
         [[NSWorkspace sharedWorkspace] launchApplication:path];
     }
+
+    //job done, dont stay in background
+    [NSApp terminate:nil];
 }
 
 

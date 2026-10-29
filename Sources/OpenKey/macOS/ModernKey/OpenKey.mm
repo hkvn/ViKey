@@ -11,6 +11,7 @@
 #import "Engine.h"
 #import "AppDelegate.h"
 #import "ViewController.h"
+#import "OpenKeyManager.h"
 
 #define FRONT_APP [[NSWorkspace sharedWorkspace] frontmostApplication].bundleIdentifier
 #define OTHER_CONTROL_KEY (_flag & kCGEventFlagMaskCommand) || (_flag & kCGEventFlagMaskControl) || \
@@ -85,6 +86,7 @@ extern "C" {
     vector<Byte> savedSmartSwitchKeyData; ////use for smart switch key
     
     NSString* _frontMostApp = @"UnknownApp";
+    NSString* _targetApp = nil; //app which receives current key, see getTargetApp()
     
     void OpenKeyInit() {
         //load saved data
@@ -179,22 +181,38 @@ extern "C" {
         NSArray *windows = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
                                                                         kCGNullWindowID));
         for (NSDictionary *window in windows) {
-            if ([[window objectForKey:(__bridge NSString *)kCGWindowOwnerName] isEqualToString:@"Spotlight"]) {
-                return true;
-            }
+            if (![[window objectForKey:(__bridge NSString *)kCGWindowOwnerName] isEqualToString:@"Spotlight"])
+                continue;
+            //skip Spotlight's menu bar icon, only the search panel counts
+            CGRect bounds;
+            if (!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)[window objectForKey:(__bridge NSString *)kCGWindowBounds], &bounds) ||
+                bounds.size.width < 100)
+                continue;
+            NSNumber* alpha = [window objectForKey:(__bridge NSString *)kCGWindowAlpha];
+            if (alpha != nil && alpha.doubleValue <= 0)
+                continue;
+            return true;
         }
         return false;
     }
 
-    BOOL shouldUseRecommendWorkaround(NSString* topApp) {
-        if (!vFixRecommendBrowser) return false;
-        if (isSpotlightVisible()) return false;
-        if (topApp == nil) return true;
-        return ![_recommendWorkaroundDisabledApp containsObject:topApp];
+    //Spotlight panel takes keys but it is never the frontmost app.
+    //Query once per key event: _targetApp is reset in OpenKeyCallback
+    NSString* getTargetApp() {
+        if (_targetApp == nil) {
+            _targetApp = isSpotlightVisible() ? @"com.apple.Spotlight" : FRONT_APP;
+            if (_targetApp == nil)
+                _targetApp = @"";
+        }
+        return _targetApp;
     }
 
-    BOOL shouldUseSelectionReplacement(NSString* topApp) {
-        return isSpotlightVisible() || [_recommendWorkaroundDisabledApp containsObject:topApp];
+    BOOL shouldUseRecommendWorkaround() {
+        return vFixRecommendBrowser && ![_recommendWorkaroundDisabledApp containsObject:getTargetApp()];
+    }
+
+    BOOL shouldUseSelectionReplacement() {
+        return [_recommendWorkaroundDisabledApp containsObject:getTargetApp()];
     }
     
     void saveSmartSwitchKeyData() {
@@ -341,7 +359,7 @@ extern "C" {
             InsertKeyLength(1);
         
         _newChar = 0x202F; //empty char
-        if ([_niceSpaceApp containsObject:FRONT_APP]) {
+        if ([_niceSpaceApp containsObject:getTargetApp()]) {
             _newChar = 0x200C; //Unicode character with empty space
         }
         
@@ -372,7 +390,7 @@ extern "C" {
         
         if (IS_DOUBLE_CODE(vCodeTable)) { //VNI or Unicode Compound
             if (_syncKey.back() > 1) {
-                if (!(vCodeTable == 3 && containUnicodeCompoundApp(FRONT_APP))) {
+                if (!(vCodeTable == 3 && containUnicodeCompoundApp(getTargetApp()))) {
                     CGEventTapPostEvent(_proxy, eventBackSpaceDown);
                     CGEventTapPostEvent(_proxy, eventBackSpaceUp);
                 }
@@ -394,7 +412,7 @@ extern "C" {
         
         if (IS_DOUBLE_CODE(vCodeTable)) { //VNI or Unicode Compound
             if (_syncKey.back() > 1) {
-                if (!(vCodeTable == 3 && containUnicodeCompoundApp(FRONT_APP))) {
+                if (!(vCodeTable == 3 && containUnicodeCompoundApp(getTargetApp()))) {
                     CGEventTapPostEvent(_proxy, eventVkeyDown);
                     CGEventTapPostEvent(_proxy, eventVkeyUp);
                 }
@@ -403,6 +421,17 @@ extern "C" {
         }
         CFRelease(eventVkeyDown);
         CFRelease(eventVkeyUp);
+    }
+    
+    //delete chars before cursor. In apps where backspace breaks (Spotlight), select them instead: new chars replace the selection
+    void SendDeleteKeys(const int& count) {
+        bool useSelection = shouldUseSelectionReplacement();
+        for (int i = 0; i < count; i++) {
+            if (useSelection)
+                SendShiftAndLeftArrow();
+            else
+                SendBackspace();
+        }
     }
     
     void SendCutKey() {
@@ -543,16 +572,14 @@ extern "C" {
     
     void handleMacro() {
         //fix autocomplete
-        if (shouldUseRecommendWorkaround(FRONT_APP)) {
+        if (shouldUseRecommendWorkaround()) {
             SendEmptyCharacter();
             pData->backspaceCount++;
         }
         
         //send backspace
         if (pData->backspaceCount > 0) {
-            for (int i = 0; i < pData->backspaceCount; i++) {
-                SendBackspace();
-            }
+            SendDeleteKeys(pData->backspaceCount);
         }
         //send real data
         if (!vSendKeyStepByStep) {
@@ -599,10 +626,18 @@ extern "C" {
      * MAIN Callback.
      */
     CGEventRef OpenKeyCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
+        //macOS turns off the tap when the callback is too slow, turn it on again
+        if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+            [OpenKeyManager reEnableEventTap];
+            return event;
+        }
+        
         //dont handle my event
         if (CGEventGetIntegerValueField(event, kCGEventSourceStateID) == CGEventSourceGetSourceStateID(myEventSource)) {
             return event;
         }
+        
+        _targetApp = nil;
         
         _flag = CGEventGetFlags(event);
         _keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
@@ -624,7 +659,10 @@ extern "C" {
                     return NULL;
                 }
                 if (GET_SWITCH_KEY(convertToolHotKey) == _keycode && checkHotKey(convertToolHotKey, GET_SWITCH_KEY(convertToolHotKey) != 0xFE)){
-                    [appDelegate onQuickConvert];
+                    //run after the callback returns: it can show a modal alert
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [appDelegate onQuickConvert];
+                    });
                     _lastFlag = 0;
                     _hasJustUsedHotKey = true;
                     return NULL;
@@ -644,7 +682,9 @@ extern "C" {
                 }
                 if (checkHotKey(convertToolHotKey, GET_SWITCH_KEY(convertToolHotKey) != 0xFE)) {
                     _lastFlag = 0;
-                    [appDelegate onQuickConvert];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [appDelegate onQuickConvert];
+                    });
                     _hasJustUsedHotKey = true;
                     return NULL;
                 }
@@ -695,16 +735,16 @@ extern "C" {
             TISInputSourceRef isource = TISCopyCurrentKeyboardInputSource();
             if ( isource != NULL )
             {
+                //languages is owned by isource: read it before releasing isource
                 CFArrayRef languages = (CFArrayRef) TISGetInputSourceProperty(isource, kTISPropertyInputSourceLanguages);
-                
-                if (CFArrayGetCount(languages) > 0) {
-                    CFStringRef langRef = (CFStringRef)CFArrayGetValueAtIndex(languages, 0);
-                    NSString *currentLanguage = (__bridge NSString *)langRef;
-                    if(![currentLanguage isLike:@"en"]){
-                        return event;
-                    }
-                    CFRelease(langRef);
-                    CFRelease(isource);
+                BOOL isEnglish = YES;
+                if (languages != NULL && CFArrayGetCount(languages) > 0) {
+                    NSString *currentLanguage = (__bridge NSString *)CFArrayGetValueAtIndex(languages, 0);
+                    isEnglish = [currentLanguage isLike:@"en"];
+                }
+                CFRelease(isource);
+                if (!isEnglish) {
+                    return event;
                 }
             }
         }
@@ -723,7 +763,7 @@ extern "C" {
                         _syncKey.clear();
                     } else if (pData->extCode == 2) { //delete key
                         if (_syncKey.size() > 0) {
-                            if (_syncKey.back() > 1 && (vCodeTable == 2 || !containUnicodeCompoundApp(FRONT_APP))) {
+                            if (_syncKey.back() > 1 && (vCodeTable == 2 || !containUnicodeCompoundApp(getTargetApp()))) {
                                 //send one more backspace
                                 CGEventTapPostEvent(_proxy, eventBackSpaceDown);
                                 CGEventTapPostEvent(_proxy, eventBackSpaceUp);
@@ -739,8 +779,8 @@ extern "C" {
             } else if (pData->code == vWillProcess || pData->code == vRestore || pData->code == vRestoreAndStartNewSession) { //handle result signal
                 
                 //fix autocomplete
-                if (shouldUseRecommendWorkaround(FRONT_APP) && pData->extCode != 4) {
-                    if (vFixChromiumBrowser && [_unicodeCompoundApp containsObject:FRONT_APP]) {
+                if (shouldUseRecommendWorkaround() && pData->extCode != 4) {
+                    if (vFixChromiumBrowser && [_unicodeCompoundApp containsObject:getTargetApp()]) {
                         if (pData->backspaceCount > 0) {
                             SendShiftAndLeftArrow();
                             if (pData->backspaceCount == 1)
@@ -753,18 +793,9 @@ extern "C" {
                     }
                 }
 
-                if (shouldUseSelectionReplacement(FRONT_APP) && pData->backspaceCount > 0) {
-                    for (_i = 0; _i < pData->backspaceCount; _i++) {
-                        SendShiftAndLeftArrow();
-                    }
-                    pData->backspaceCount = 0;
-                }
-                
                 //send backspace
                 if (pData->backspaceCount > 0 && pData->backspaceCount < MAX_BUFF) {
-                    for (_i = 0; _i < pData->backspaceCount; _i++) {
-                        SendBackspace();
-                    }
+                    SendDeleteKeys(pData->backspaceCount);
                 }
                 
                 //send new character

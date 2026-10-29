@@ -482,12 +482,13 @@ void checkCorrectVowel(vector<vector<Uint16>>& charset, int& i, int& k, const Ui
             break;
     }
     
-    //limit mark for end consonant: "C", "T"
+    //limit mark for end consonant: "C", "CH", "T" (quick end consonant "K" means "CH")
     if (isCorect && charset[i].size() > 1 && (IS_KEY_F(markKey) || IS_KEY_X(markKey) || IS_KEY_R(markKey))) {
-        if (charset[i][1] == KEY_C || charset[i][1] == KEY_T) {
-            isCorect = false;
-        } else if (charset[i].size() > 2 && (charset[i][2] == KEY_T)) {
-            isCorect = false;
+        for (j = 1; j < charset[i].size(); j++) {
+            if (charset[i][j] == KEY_C || charset[i][j] == KEY_T || charset[i][j] == (KEY_K | END_CONSONANT_MASK)) {
+                isCorect = false;
+                break;
+            }
         }
     }
     

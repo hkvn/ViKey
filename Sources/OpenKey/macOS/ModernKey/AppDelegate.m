@@ -64,6 +64,15 @@ extern bool convertToolDontAlertWhenCompleted;
 
 @end
 
+//YES if process a started before process b
+static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinfo* b) {
+    if (a->pbi_start_tvsec != b->pbi_start_tvsec)
+        return a->pbi_start_tvsec < b->pbi_start_tvsec;
+    if (a->pbi_start_tvusec != b->pbi_start_tvusec)
+        return a->pbi_start_tvusec < b->pbi_start_tvusec;
+    return a->pbi_pid < b->pbi_pid;
+}
+
 
 @implementation AppDelegate {
     NSWindowController *_mainWC;
@@ -122,18 +131,16 @@ extern bool convertToolDontAlertWhenCompleted;
     
     //check whether this app has been launched before that or not
     //Only check instances owned by current user (for multi-user/Fast User Switching support)
-    uid_t currentUID = getuid();
-    NSArray<NSRunningApplication *>* runningApps = [[NSWorkspace sharedWorkspace] runningApplications];
-    pid_t myPID = [[NSProcessInfo processInfo] processIdentifier];
+    //If two instances start at the same time, only the older one keeps running
     BOOL alreadyRunning = NO;
-
-    for (NSRunningApplication *app in runningApps) {
-        if ([app.bundleIdentifier isEqualToString:OPENKEY_BUNDLE] &&
-            app.processIdentifier != myPID) {
-            pid_t pid = app.processIdentifier;
-            struct proc_bsdinfo proc;
-            int size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &proc, sizeof(proc));
-            if (size == sizeof(proc) && proc.pbi_uid == currentUID) {
+    struct proc_bsdinfo me, other;
+    if (proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &me, sizeof(me)) == sizeof(me)) {
+        for (NSRunningApplication *app in [NSRunningApplication runningApplicationsWithBundleIdentifier:OPENKEY_BUNDLE]) {
+            if (app.processIdentifier == me.pbi_pid || app.terminated)
+                continue;
+            if (proc_pidinfo(app.processIdentifier, PROC_PIDTBSDINFO, 0, &other, sizeof(other)) != sizeof(other) || other.pbi_uid != me.pbi_uid)
+                continue;
+            if (startedBefore(&other, &me)) {
                 alreadyRunning = YES;
                 break;
             }

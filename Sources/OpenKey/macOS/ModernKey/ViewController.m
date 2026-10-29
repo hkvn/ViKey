@@ -73,10 +73,23 @@ extern int vPerformLayoutCompat;
         tabButtonBackgroundRect = NSUnionRect(tabButtonBackgroundRect, button.frame);
     }
     tabButtonBackgroundRect = NSInsetRect(tabButtonBackgroundRect, -2, -2);
-    tabButtonBackground = [[NSView alloc] initWithFrame:tabButtonBackgroundRect];
-    [tabButtonBackground setWantsLayer:YES];
-    tabButtonBackground.layer.backgroundColor = [[NSColor windowBackgroundColor] CGColor];
-    [self.view addSubview:tabButtonBackground];
+    //NSBox redraws its fill color when light/dark mode changes
+    NSBox* background = [[NSBox alloc] initWithFrame:tabButtonBackgroundRect];
+    background.boxType = NSBoxCustom;
+    background.titlePosition = NSNoTitle;
+    background.borderWidth = 0;
+    background.fillColor = [NSColor windowBackgroundColor];
+    tabButtonBackground = background;
+    //background above the tab views, tab buttons above the background
+    NSView* topTabView = nil;
+    for (NSView* v in self.view.subviews) {
+        if ([tabviews containsObject:v])
+            topTabView = v;
+    }
+    [self.view addSubview:tabButtonBackground positioned:NSWindowAbove relativeTo:topTabView];
+    for (NSButton* tabButton in tabbuttons) {
+        [self.view addSubview:tabButton positioned:NSWindowAbove relativeTo:nil];
+    }
     tabViewRect = self.tabviewPrimary.frame;
     for (NSBox* b in tabviews) {
         b.frame = tabViewRect;
@@ -148,11 +161,6 @@ extern int vPerformLayoutCompat;
     
     NSButton* button = [tabbuttons objectAtIndex:index];
     [button setState:NSControlStateValueOn];
-
-    [self.view addSubview:tabButtonBackground positioned:NSWindowAbove relativeTo:b];
-    for (NSButton* tabButton in tabbuttons) {
-        [self.view addSubview:tabButton positioned:NSWindowAbove relativeTo:nil];
-    }
 }
 
 - (IBAction)onTabButton:(NSButton *)sender {
