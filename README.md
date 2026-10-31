@@ -84,7 +84,7 @@ Danh sách các phiên bản: [Releases](https://github.com/hkvn/ViKey/releases)
 ## Không gõ được tiếng Việt?
 Mở menu ViKey → **Chẩn đoán…**: cửa sổ này cho biết quyền Accessibility, Secure Input, ứng dụng đang nhận phím, bộ gõ khác đang chạy,... Bấm **Sao chép báo cáo** để gửi kèm khi báo lỗi (báo cáo không chứa nội dung bạn gõ).
 
-- **Biểu tượng ổ khoá trên thanh menu:** một ứng dụng đang bật Secure Input (ô mật khẩu, "Secure Keyboard Entry" của Terminal / iTerm / Ghostty, trình quản lý mật khẩu,...). Bấm vào biểu tượng ViKey để xem cách khắc phục. Lưu ý: macOS chỉ cho biết ứng dụng ở phía trước lúc Secure Input bật, nên ứng dụng thật sự gây ra có thể là một ứng dụng khác đang chạy nền.
+- **Biểu tượng ổ khoá trên thanh menu:** một ứng dụng đang bật Secure Input (ô mật khẩu, "Secure Keyboard Entry" của Terminal / iTerm / Ghostty, trình quản lý mật khẩu,...). Bấm vào biểu tượng ViKey để xem cách khắc phục. macOS không cho biết ứng dụng nào bật Secure Input, nó có thể là một ứng dụng chạy nền. Nếu dùng Ghostty: thêm `macos-auto-secure-input = false` vào file cấu hình của Ghostty, vì Ghostty tự bật Secure Input khi đoán là bạn gõ mật khẩu và hay đoán sai.
 - **Mất quyền Accessibility:** vào *System Settings → Privacy & Security → Accessibility*, xoá `ViKey` bằng nút "−", rồi mở lại ViKey để cấp quyền.
 - **Bộ gõ khác đang chạy:** tắt các bộ gõ tiếng Việt khác.
 

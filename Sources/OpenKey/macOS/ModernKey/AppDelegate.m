@@ -669,22 +669,17 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         pid = [[session objectForKey:@"kCGSSessionSecureInputPID"] intValue];
     }
 
-    if (on != _secureInputOn || pid != _secureInputPID) {
+    if (on != _secureInputOn) {
         _secureInputOn = on;
         _secureInputPID = pid;
         _secureInputSince = [NSDate date];
         _secureInputNotified = NO;
-
-        NSString* appName = [self secureInputAppName];
         if (on)
-            VKLog(@"secure-input", @"on, macOS names %@ (pid %d), the app in front when it turned on", [self processName:pid] ?: @"?", pid);
+            VKLog(@"secure-input", @"on (macOS names %@, pid %d; front app %@)", [self processName:pid] ?: @"?", pid,
+                  [NSWorkspace sharedWorkspace].frontmostApplication.localizedName ?: @"?");
         else
             VKLog(@"secure-input", @"off");
-        mnuSecureInput.title = appName ? [NSString stringWithFormat:@"Không gõ được: Secure Input đang bật (có thể do %@)", appName]
-                                       : @"Không gõ được: Secure Input đang bật";
-        mnuSecureInput.hidden = !on;
-        mnuSecureInputSeparator.hidden = !on;
-        statusItem.button.toolTip = on ? mnuSecureInput.title : nil;
+        [self updateSecureInputMenu];
         [self updateStatusIcon];
 
         if (!on) {
@@ -692,6 +687,10 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
                 [[UNUserNotificationCenter currentNotificationCenter] removeDeliveredNotificationsWithIdentifiers:@[SECURE_INPUT_NOTIFICATION]];
             }
         }
+    } else if (on && pid != _secureInputPID) {
+        //the user switched apps: macOS names the new front app, Secure Input is still on
+        _secureInputPID = pid;
+        [self updateSecureInputMenu];
     }
 
     //notify only in Vietnamese mode: in English mode typing still works
@@ -723,11 +722,21 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     return nil;
 }
 
-//The app macOS names for Secure Input is the app in front when Secure Input turned on, not always the app which
-//turned it on: an app in the background (password manager, terminal,...) can turn it on too.
-//nil if unknown, or if it is ViKey, which never turns Secure Input on
+-(void)updateSecureInputMenu {
+    NSString* appName = [self secureInputAppName];
+    mnuSecureInput.title = appName ? [NSString stringWithFormat:@"Không gõ được: Secure Input đang bật (có thể do %@)", appName]
+                                   : @"Không gõ được: Secure Input đang bật";
+    mnuSecureInput.hidden = !_secureInputOn;
+    mnuSecureInputSeparator.hidden = !_secureInputOn;
+    statusItem.button.toolTip = _secureInputOn ? mnuSecureInput.title : nil;
+}
+
+//macOS does not tell which app turned Secure Input on: it names the app in front, and the name follows the front app
+//while Secure Input stays on. Only a name which is not the front app tells something, such as loginwindow after
+//the screen was locked. nil if unknown, or if it is ViKey, which never turns Secure Input on
 -(NSString*)secureInputAppName {
-    if (_secureInputPID == getpid())
+    if (_secureInputPID <= 0 || _secureInputPID == getpid() ||
+        _secureInputPID == [NSWorkspace sharedWorkspace].frontmostApplication.processIdentifier)
         return nil;
     return [self processName:_secureInputPID];
 }
@@ -759,14 +768,14 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     [alert setMessageText:appName ? [NSString stringWithFormat:@"Secure Input đang bật (có thể do %@)", appName] : @"Secure Input đang bật"];
     [alert setInformativeText:@"Khi Secure Input bật, macOS không gửi phím cho bộ gõ, nên ViKey tạm thời không gõ được tiếng Việt. "
                               @"Đây là tính năng bảo mật của macOS, thường bật khi bạn nhập mật khẩu.\n\n"
-                              @"macOS chỉ cho biết ứng dụng ở phía trước lúc Secure Input bật. Ứng dụng thật sự bật nó "
-                              @"có thể là một ứng dụng khác đang chạy nền.\n\n"
-                              @"Cách khắc phục:\n"
-                              @"• Rời khỏi ô mật khẩu, hoặc chuyển sang ứng dụng khác.\n"
-                              @"• Terminal, iTerm, Ghostty: tắt \"Secure Keyboard Entry\" trong menu của ứng dụng. "
-                              @"Ghostty còn tự bật Secure Input khi bạn gõ mật khẩu (ví dụ sudo).\n"
+                              @"macOS không cho biết ứng dụng nào đã bật Secure Input, nó có thể là một ứng dụng chạy nền. "
+                              @"Thường gặp:\n"
+                              @"• Một ô mật khẩu đang mở: rời khỏi ô đó, hoặc đóng cửa sổ.\n"
+                              @"• Terminal, iTerm, Ghostty: tắt \"Secure Keyboard Entry\" trong menu của ứng dụng.\n"
+                              @"• Ghostty tự bật Secure Input khi đoán là bạn gõ mật khẩu, và hay đoán sai. Thêm dòng "
+                              @"\"macos-auto-secure-input = false\" vào file cấu hình của Ghostty rồi nạp lại (⌘⇧,).\n"
                               @"• Trình quản lý mật khẩu (1Password, Bitwarden,…): đóng cửa sổ của nó.\n"
-                              @"• Nếu vẫn bị (nhất là với loginwindow): khoá màn hình rồi mở khoá lại."];
+                              @"• loginwindow, hoặc vẫn bị: khoá màn hình rồi mở khoá lại."];
     [alert addButtonWithTitle:@"OK"];
     BOOL canOpenApp = app != nil && app.activationPolicy == NSApplicationActivationPolicyRegular;
     if (canOpenApp)
