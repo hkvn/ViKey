@@ -71,6 +71,9 @@ extern bool convertToolDontAlertWhenCompleted;
 //ViKey was OpenKey, which used this bundle id
 #define OPENKEY_LEGACY_BUNDLE @"com.tuyenmai.openkey"
 
+//posted by the app and the ViKey input method when Vietnamese / English changes; the object is the bundle id of the sender
+#define LANGUAGE_CHANGED_NOTIFICATION @"com.hkvn.vikey.LanguageChanged"
+
 @interface AppDelegate () <UNUserNotificationCenterDelegate>
 
 @end
@@ -92,6 +95,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     DiagnosticsWindowController *_diagnosticsWC;
     WelcomeWindowController *_welcomeWC;
     BOOL _started;
+    int _postedLanguage;
     
     NSStatusItem *statusItem;
     NSMenu *theMenu;
@@ -518,7 +522,15 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         [mnuVietnameseLocaleCP1258 setState:NSControlStateValueOn];
     }
     vCodeTable = (int)intCode;
+    int language = vLanguage;
     EngineUnlock();
+    
+    //the ViKey input method uses the same mode
+    if (language != _postedLanguage) {
+        _postedLanguage = language;
+        [[NSDistributedNotificationCenter defaultCenter] postNotificationName:LANGUAGE_CHANGED_NOTIFICATION object:OPENKEY_BUNDLE
+                                                                     userInfo:nil deliverImmediately:YES];
+    }
     
     //
     NSInteger intRunOnStartup = [[NSUserDefaults standardUserDefaults] integerForKey:@"RunOnStartup"];
@@ -818,6 +830,19 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     RequestNewSession();
 }
 
+//the ViKey input method switched Vietnamese / English: show it, and remember it for the app like a switch in the menu
+-(void)languageChangedElsewhere:(NSNotification*)note {
+    if ([note.object isEqual:OPENKEY_BUNDLE])
+        return;
+    CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication);
+    int before = vLanguage;
+    [self fillData];
+    if (vLanguage != before) {
+        OnInputMethodChanged();
+        VKLog(@"mode", @"%@ from the input method", vLanguage ? @"Vietnamese" : @"English");
+    }
+}
+
 -(void)activeAppChanged: (NSNotification*)note {
     //the typing app changes too: it applies its remembered mode (smart switch) and the "always English" list
     OnFrontAppChanged();
@@ -840,5 +865,9 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver: self
                                                            selector: @selector(activeAppChanged:)
                                                                name: NSWorkspaceDidActivateApplicationNotification object: NULL];
+    
+    [[NSDistributedNotificationCenter defaultCenter] addObserver:self selector:@selector(languageChangedElsewhere:)
+                                                            name:LANGUAGE_CHANGED_NOTIFICATION object:nil
+                                                suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
 }
 @end

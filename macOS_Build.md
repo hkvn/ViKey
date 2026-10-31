@@ -49,6 +49,24 @@ GitHub Actions (`.github/workflows/macos.yml`) chạy kiểm thử và build ViK
 
 macOS ghi nhớ quyền Accessibility theo chữ ký của ứng dụng. Nếu ký ad-hoc (`CODE_SIGN_IDENTITY="-"`), mỗi bản build có chữ ký khác nhau, nên phải cấp quyền lại sau mỗi lần build. Ký bằng cùng một chứng chỉ thì quyền được giữ khi build lại hoặc cập nhật.
 
+## Bộ gõ InputMethodKit (thử nghiệm, nhánh `imk`)
+
+Ngoài ViKey.app (bắt phím bằng event tap, cần quyền Accessibility), nhánh này có thêm một bộ gõ dạng InputMethodKit: một nguồn nhập (input source) như bộ gõ tiếng Việt của macOS. Nó dùng chung bộ gõ C++ và đọc cài đặt của ViKey.app (kiểu gõ, bảng mã, chính tả, gõ tắt, phím chuyển, ứng dụng luôn dùng English).
+
+```sh
+scripts/build-input-method.sh             # build vào build/input-method/ViKeyInput.app
+scripts/build-input-method.sh --install   # cài vào ~/Library/Input Methods và bật
+scripts/build-input-method.sh --uninstall # tắt và gỡ
+```
+
+Sau khi cài, chọn **ViKey** trong menu nguồn nhập trên thanh menu. Khi nguồn nhập ViKey được chọn, ViKey.app tự đứng ngoài (không xử lý phím), nên có thể để cả hai cùng chạy.
+
+- Không cần quyền Accessibility, và vẫn gõ được khi một ứng dụng chạy nền bật Secure Input (ô mật khẩu vẫn chỉ gõ được tiếng Anh, do macOS).
+- Chế độ Tiếng Việt / English dùng chung với ViKey.app: chuyển ở đâu (phím tắt, menu) thì cả hai cùng đổi, biểu tượng trên thanh menu luôn đúng.
+- Hai cách hiện từ đang gõ: **viết thẳng** vào ứng dụng (mặc định, không gạch chân, giống ViKey.app) hoặc **gạch chân** (marked text). Các ứng dụng dòng lệnh (Ghostty, Terminal, iTerm2,...) luôn dùng gạch chân, vì chúng không cho biết vị trí con trỏ. ViKey cũng tự chuyển sang gạch chân với ứng dụng khác không cho biết vị trí con trỏ; có thể chọn cho từng ứng dụng trong menu nguồn nhập.
+- Mã nguồn: `Sources/OpenKey/macOS/InputMethod` (`Composer` dựng từ đang gõ từ kết quả của bộ gõ, `InputController` đưa từ vào ứng dụng). Kiểm thử: `Tests/inputmethod`.
+- Chưa có: chuyển chế độ thông minh theo ứng dụng, gõ tắt khi tắt tiếng Việt, tương thích layout khác, chuyển mã nhanh.
+
 ## Tạo bản phát hành trên GitHub
 
 Script `scripts/release-macos.sh` làm toàn bộ việc phát hành trên máy Mac của bạn, chứng chỉ không rời khỏi máy:

@@ -29,6 +29,7 @@
 #define AX_TIMEOUT 0.05 //seconds, see FocusedApp()
 #define SLOW_EVENT_LOG 20000 //microseconds: handling one event slower than this is logged
 #define MAX_CLIPBOARD_MACRO 2000 //characters of {clipboard} in a macro
+#define VIKEY_INPUT_METHOD @"com.hkvn.inputmethod.ViKey" //InputMethodKit version of ViKey, see Sources/OpenKey/macOS/InputMethod
 
 // Ignore code for Modifier keys and numpad
 // Reference: https://eastmanreference.com/complete-list-of-applescript-key-codes
@@ -118,6 +119,7 @@ extern "C" {
     
     //see UpdateInputSourceLanguage()
     bool _isEnglishInputSource = true;
+    bool _isViKeyInputMethod = false; //the ViKey input method types: the event tap does nothing
     NSString* _inputSource = @"";
     CFDataRef _keyboardLayout = NULL; //'uchr' data of the keyboard layout, see ConvertEventToKeyboadLayoutCompatKeyCode()
     UInt32 _keyboardType = 0;
@@ -166,6 +168,7 @@ extern "C" {
         if (![inputSource isEqualToString:_inputSource])
             VKLog(@"keyboard", @"input source: %@", inputSource);
         _isEnglishInputSource = isEnglish;
+        _isViKeyInputMethod = [inputSource hasPrefix:VIKEY_INPUT_METHOD];
         _inputSource = inputSource;
         if (_keyboardLayout != NULL)
             CFRelease(_keyboardLayout);
@@ -906,6 +909,11 @@ extern "C" {
         
         //dont handle my event
         if (CGEventGetIntegerValueField(event, kCGEventSourceStateID) == CGEventSourceGetSourceStateID(myEventSource)) {
+            return event;
+        }
+        
+        //the ViKey input method is the input source: it types, hotkeys included
+        if (_isViKeyInputMethod) {
             return event;
         }
         

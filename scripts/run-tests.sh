@@ -5,6 +5,7 @@
 # usage: scripts/run-tests.sh
 #
 #   Tests/engine    typing engine, convert tool, macros (C++, no Xcode project needed)
+#   Tests/inputmethod  word building of the input method (InputMethodKit test version)
 #   Tests/settings  settings model of the settings window, macro files and macro sync (Swift + stubs of the app)
 #
 set -euo pipefail
@@ -21,6 +22,21 @@ clang++ -std=c++17 -O1 -Wall -Wno-sign-compare -I"$ENGINE" \
     "$ENGINE/Engine.cpp" "$ENGINE/Vietnamese.cpp" "$ENGINE/Macro.cpp" "$ENGINE/ConvertTool.cpp" "$ENGINE/SmartSwitchKey.cpp" \
     Tests/engine/TestGlobals.cpp Tests/engine/EngineTests.cpp -o "$OUT/engine-tests"
 "$OUT/engine-tests"
+
+echo "==> Input method tests"
+IM_SOURCES="$REPO_ROOT/Sources/OpenKey/macOS/InputMethod"
+clang++ -std=c++17 -O1 -fobjc-arc -Wall -Wno-sign-compare -mmacosx-version-min=13.0 -I"$ENGINE" -I"$IM_SOURCES" \
+    "$ENGINE/Engine.cpp" "$ENGINE/Vietnamese.cpp" "$ENGINE/Macro.cpp" "$ENGINE/ConvertTool.cpp" "$ENGINE/SmartSwitchKey.cpp" \
+    "$IM_SOURCES/EngineGlobals.cpp" "$IM_SOURCES/Composer.mm" Tests/inputmethod/ComposerTests.mm \
+    -framework Foundation -o "$OUT/inputmethod-tests"
+clang++ -std=c++17 -O1 -fobjc-arc -w -mmacosx-version-min=13.0 -I"$ENGINE" -I"$IM_SOURCES" \
+    "$ENGINE/Engine.cpp" "$ENGINE/Vietnamese.cpp" "$ENGINE/Macro.cpp" "$ENGINE/ConvertTool.cpp" "$ENGINE/SmartSwitchKey.cpp" \
+    "$IM_SOURCES/EngineGlobals.cpp" "$IM_SOURCES/Composer.mm" "$IM_SOURCES/InputController.mm" Tests/inputmethod/ControllerTests.mm \
+    -framework Cocoa -framework InputMethodKit -framework Carbon -o "$OUT/inputmethod-controller-tests"
+"$OUT/inputmethod-controller-tests"
+defaults delete inputmethod-controller-tests >/dev/null 2>&1 || true
+rm -f "$HOME/Library/Preferences/inputmethod-controller-tests.plist"
+"$OUT/inputmethod-tests"
 
 echo "==> Settings tests"
 #the settings windows use the engine through EngineBridge; the rest of the app is replaced by AppStubs
