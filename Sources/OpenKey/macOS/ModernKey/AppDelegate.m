@@ -17,6 +17,7 @@
 #import "ViewController.h"
 #import "OpenKeyManager.h"
 #import "MJAccessibilityUtils.h"
+#import "OpenKey-Swift.h"
 
 AppDelegate* appDelegate;
 extern ViewController* viewController;
@@ -79,10 +80,9 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
 
 @implementation AppDelegate {
-    NSWindowController *_mainWC;
+    SettingsWindowController *_settingsWC;
     NSWindowController *_macroWC;
     NSWindowController *_convertWC;
-    NSWindowController *_aboutWC;
     
     NSStatusItem *statusItem;
     NSMenu *theMenu;
@@ -260,7 +260,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     
     [theMenu addItem:[NSMenuItem separatorItem]];
     
-    [theMenu addItemWithTitle:@"Bảng điều khiển..." action:@selector(onControlPanelSelected) keyEquivalent:@""];
+    [theMenu addItemWithTitle:@"Cài đặt…" action:@selector(onControlPanelSelected) keyEquivalent:@","];
     [theMenu addItemWithTitle:@"Gõ tắt..." action:@selector(onMacroSelected) keyEquivalent:@""];
     [theMenu addItemWithTitle:@"Giới thiệu" action:@selector(onAboutSelected) keyEquivalent:@""];
     [theMenu addItem:[NSMenuItem separatorItem]];
@@ -350,8 +350,17 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 -(void)setRunOnStartup:(BOOL)val {
-    CFStringRef appId = (__bridge CFStringRef)@"com.tuyenmai.OpenKeyHelper";
-    SMLoginItemSetEnabled(appId, val);
+    //OpenKey itself is the login item, no helper app needed
+    SMAppService* service = [SMAppService mainAppService];
+    NSError* error = nil;
+    if (val && (service.status == SMAppServiceStatusNotRegistered || service.status == SMAppServiceStatusNotFound)) {
+        //"requires approval" means the user turned it off in System Settings: do not register again
+        [service registerAndReturnError:&error];
+    } else if (!val && service.status != SMAppServiceStatusNotRegistered) {
+        [service unregisterAndReturnError:&error];
+    }
+    if (error)
+        NSLog(@"OpenKey: can not change login item: %@", error);
 }
 
 -(void)setGrayIcon:(BOOL)val {
@@ -442,6 +451,8 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     NSInteger intRunOnStartup = [[NSUserDefaults standardUserDefaults] integerForKey:@"RunOnStartup"];
     [self setRunOnStartup:intRunOnStartup ? YES : NO];
 
+    //refresh the settings window
+    [[NSNotificationCenter defaultCenter] postNotificationName:SettingsWindowController.settingsDidChangeNotification object:nil];
 }
 
 -(void)updateStatusIcon {
@@ -532,16 +543,15 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     }
 }
 
+-(SettingsWindowController*) settingsWindowController {
+    if (_settingsWC == nil) {
+        _settingsWC = [[SettingsWindowController alloc] init];
+    }
+    return _settingsWC;
+}
+
 -(void) onControlPanelSelected {
-    if (_mainWC == nil) {
-        _mainWC = [[NSStoryboard storyboardWithName:@"Main" bundle:nil] instantiateControllerWithIdentifier:@"OpenKey"];
-    }
-    //[OpenKeyManager showDockIcon:YES];
-    if ([_mainWC.window isVisible]) {
-        return;
-    }
-    [_mainWC.window makeKeyAndOrderFront:nil];
-    [_mainWC.window setLevel:NSFloatingWindowLevel];
+    [[self settingsWindowController] show];
 }
 
 -(void) onMacroSelected {
@@ -557,15 +567,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 -(void) onAboutSelected {
-    if (_aboutWC == nil) {
-        _aboutWC = [[NSStoryboard storyboardWithName:@"Main" bundle:nil] instantiateControllerWithIdentifier:@"AboutWindow"];
-    }
-    //[OpenKeyManager showDockIcon:YES];
-    if ([_aboutWC.window isVisible])
-        return;
-
-    [_aboutWC.window makeKeyAndOrderFront:nil];
-    [_aboutWC.window setLevel:NSFloatingWindowLevel];
+    [[self settingsWindowController] showWithTab:SettingsWindowController.aboutTab];
 }
 
 #pragma mark -Secure Input

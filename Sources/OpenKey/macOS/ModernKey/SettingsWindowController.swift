@@ -1,0 +1,65 @@
+//
+//  SettingsWindowController.swift
+//  OpenKey
+//
+//  Settings window with toolbar tabs, like the settings of other Mac apps.
+//
+
+import AppKit
+import SwiftUI
+
+@objc final class SettingsWindowController: NSWindowController {
+    /// posted when settings change outside the settings window (menu bar, smart switch,...)
+    @objc static let settingsDidChangeNotification = Notification.Name("OpenKeySettingsDidChange")
+
+    @objc static let aboutTab = 4
+
+    private let model = SettingsModel()
+    private let tabs = NSTabViewController()
+
+    @objc convenience init() {
+        self.init(window: nil)
+
+        tabs.tabStyle = .toolbar
+        addTab(TypingSettingsView(model: model), title: "Bộ gõ", symbol: "keyboard")
+        addTab(SpellingSettingsView(model: model), title: "Chính tả", symbol: "textformat.abc")
+        addTab(MacroSettingsView(model: model), title: "Gõ tắt", symbol: "text.badge.plus")
+        addTab(SystemSettingsView(model: model), title: "Hệ thống", symbol: "gearshape")
+        addTab(AboutSettingsView(), title: "Giới thiệu", symbol: "info.circle")
+
+        let window = NSWindow(contentViewController: tabs)
+        window.styleMask = [.titled, .closable]
+        window.toolbarStyle = .preference
+        window.isReleasedWhenClosed = false
+        window.center()
+        self.window = window
+    }
+
+    private func addTab<Content: View>(_ view: Content, title: String, symbol: String) {
+        let controller = NSHostingController(rootView: view)
+        controller.title = title
+        //the window takes the height of the selected tab
+        controller.sizingOptions = .preferredContentSize
+        let item = NSTabViewItem(viewController: controller)
+        item.label = title
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        tabs.addTabViewItem(item)
+    }
+
+    @objc func show(tab: Int) {
+        tabs.selectedTabViewItemIndex = tab
+        show()
+    }
+
+    @objc func show() {
+        model.reload()
+        //OpenKey is a menu bar app: bring it to the front so the window is not behind other apps
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+    }
+}
