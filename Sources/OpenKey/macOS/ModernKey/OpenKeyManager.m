@@ -42,13 +42,12 @@ static CFRunLoopSourceRef runLoopSource;
     OpenKeyInit();
     
     // Create an event tap. We are interested in key presses.
+    // Mouse down starts a new word; mouse drags are not needed and would wake the app very often
     eventMask = ((1 << kCGEventKeyDown) |
                  (1 << kCGEventKeyUp) |
                  (1 << kCGEventFlagsChanged) |
                  (1 << kCGEventLeftMouseDown) |
-                 (1 << kCGEventRightMouseDown) |
-                 (1 << kCGEventLeftMouseDragged) |
-                 (1 << kCGEventRightMouseDragged));
+                 (1 << kCGEventRightMouseDown));
     
     eventTap = CGEventTapCreate(kCGSessionEventTap,
                                 kCGHeadInsertEventTap,

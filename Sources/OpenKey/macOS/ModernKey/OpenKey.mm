@@ -22,6 +22,7 @@
 #define MAX_UNICODE_STRING  20
 #define EMPTY_HOTKEY 0xFE0000FE
 #define LOAD_DATA(VAR, KEY) VAR = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@#KEY]
+#define TARGET_APP_MAX_AGE 0.5 //seconds, see getTargetApp()
 
 // Ignore code for Modifier keys and numpad
 // Reference: https://eastmanreference.com/complete-list-of-applescript-key-codes
@@ -86,7 +87,30 @@ extern "C" {
     vector<Byte> savedSmartSwitchKeyData; ////use for smart switch key
     
     NSString* _frontMostApp = @"UnknownApp";
-    NSString* _targetApp = nil; //app which receives current key, see getTargetApp()
+    NSString* _targetApp = nil; //app which receives the keys, see getTargetApp()
+    CFAbsoluteTime _targetAppTime = 0;
+    bool _isEnglishInputSource = true; //see UpdateInputSourceLanguage()
+    
+    //for "turn off Vietnamese when in other language". Asking macOS on every key is slow (about 28 µs),
+    //so this is updated only when the keyboard input source changes
+    void UpdateInputSourceLanguage() {
+        _isEnglishInputSource = true;
+        TISInputSourceRef isource = TISCopyCurrentKeyboardInputSource();
+        if (isource != NULL) {
+            //languages is owned by isource: read it before releasing isource
+            CFArrayRef languages = (CFArrayRef) TISGetInputSourceProperty(isource, kTISPropertyInputSourceLanguages);
+            if (languages != NULL && CFArrayGetCount(languages) > 0) {
+                NSString *currentLanguage = (__bridge NSString *)CFArrayGetValueAtIndex(languages, 0);
+                _isEnglishInputSource = [currentLanguage isLike:@"en"];
+            }
+            CFRelease(isource);
+        }
+    }
+    
+    static void OnInputSourceChanged(CFNotificationCenterRef center, void *observer, CFNotificationName name,
+                                     const void *object, CFDictionaryRef userInfo) {
+        UpdateInputSourceLanguage();
+    }
     
     void OpenKeyInit() {
         //load saved data
@@ -144,11 +168,28 @@ extern "C" {
         if (convertToolHotKey == 0) {
             convertToolHotKey = EMPTY_HOTKEY;
         }
+        
+        //OpenKeyInit runs again after the Mac wakes up: add the observer only once.
+        //Deliver immediately: ViKey is a menu bar app, so it is almost never the active app
+        static bool observingInputSource = false;
+        if (!observingInputSource) {
+            observingInputSource = true;
+            CFNotificationCenterAddObserver(CFNotificationCenterGetDistributedCenter(), NULL, OnInputSourceChanged,
+                                            kTISNotifySelectedKeyboardInputSourceChanged, NULL,
+                                            CFNotificationSuspensionBehaviorDeliverImmediately);
+        }
+        UpdateInputSourceLanguage();
+    }
+    
+    //the focus may be in another app or panel now: check the target app again
+    void InvalidateTargetApp() {
+        _targetApp = nil;
     }
     
     void RequestNewSession() {
         //send event signal to Engine
         vKeyHandleEvent(vKeyEvent::Mouse, vKeyEventState::MouseDown, 0);
+        InvalidateTargetApp();
         
         if (IS_DOUBLE_CODE(vCodeTable)) { //VNI
             _syncKey.clear();
@@ -196,13 +237,15 @@ extern "C" {
         return false;
     }
 
-    //Spotlight panel takes keys but it is never the frontmost app.
-    //Query once per key event: _targetApp is reset in OpenKeyCallback
+    //Spotlight panel takes keys but it is never the frontmost app. Checking it is slow (about 0.4 ms),
+    //so check again only after something which can move the focus (see InvalidateTargetApp), or when the answer is old
     NSString* getTargetApp() {
-        if (_targetApp == nil) {
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        if (_targetApp == nil || now - _targetAppTime > TARGET_APP_MAX_AGE) {
             _targetApp = isSpotlightVisible() ? @"com.apple.Spotlight" : FRONT_APP;
             if (_targetApp == nil)
                 _targetApp = @"";
+            _targetAppTime = now;
         }
         return _targetApp;
     }
@@ -637,14 +680,18 @@ extern "C" {
             return event;
         }
         
-        _targetApp = nil;
-        
         _flag = CGEventGetFlags(event);
         _keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
         
         if (type == kCGEventKeyDown && vPerformLayoutCompat) {
             // If conversion fail, use current keycode
            _keycode = ConvertEventToKeyboadLayoutCompatKeyCode(event, _keycode);
+        }
+        
+        //things which can move the focus to another app or panel: click, Cmd+Space, Cmd+Tab, Escape, Return,...
+        if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown ||
+            (type == kCGEventKeyDown && (OTHER_CONTROL_KEY || _keycode == KEY_ESC || _keycode == KEY_RETURN || _keycode == KEY_ENTER))) {
+            InvalidateTargetApp();
         }
         
         //switch language shortcut; convert hotkey
@@ -702,8 +749,7 @@ extern "C" {
 
         // Also check correct event hooked
         if ((type != kCGEventKeyDown) && (type != kCGEventKeyUp) &&
-            (type != kCGEventLeftMouseDown) && (type != kCGEventRightMouseDown) &&
-            (type != kCGEventLeftMouseDragged) && (type != kCGEventRightMouseDragged))
+            (type != kCGEventLeftMouseDown) && (type != kCGEventRightMouseDown))
             return event;
         
         _proxy = proxy;
@@ -725,28 +771,14 @@ extern "C" {
         }
         
         //handle mouse
-        if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown || type == kCGEventLeftMouseDragged || type == kCGEventRightMouseDragged) {
+        if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown) {
             RequestNewSession();
             return event;
         }
 
         //if "turn off Vietnamese when in other language" mode on
-        if(vOtherLanguage){
-            TISInputSourceRef isource = TISCopyCurrentKeyboardInputSource();
-            if ( isource != NULL )
-            {
-                //languages is owned by isource: read it before releasing isource
-                CFArrayRef languages = (CFArrayRef) TISGetInputSourceProperty(isource, kTISPropertyInputSourceLanguages);
-                BOOL isEnglish = YES;
-                if (languages != NULL && CFArrayGetCount(languages) > 0) {
-                    NSString *currentLanguage = (__bridge NSString *)CFArrayGetValueAtIndex(languages, 0);
-                    isEnglish = [currentLanguage isLike:@"en"];
-                }
-                CFRelease(isource);
-                if (!isEnglish) {
-                    return event;
-                }
-            }
+        if (vOtherLanguage && !_isEnglishInputSource) {
+            return event;
         }
         
         //handle keyboard

@@ -25,6 +25,7 @@ extern void OnTableCodeChange(void);
 extern void OnInputMethodChanged(void);
 extern void RequestNewSession(void);
 extern void OnActiveAppChanged(void);
+extern void InvalidateTargetApp(void);
 
 //see document in Engine.h
 int vLanguage = 1;
@@ -752,6 +753,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 -(void)activeAppChanged: (NSNotification*)note {
+    InvalidateTargetApp();
     if (vUseSmartSwitchKey && [OpenKeyManager isInited]) {
         OnActiveAppChanged();
     }
