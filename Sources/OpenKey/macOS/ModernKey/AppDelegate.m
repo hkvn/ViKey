@@ -10,6 +10,7 @@
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
 #import <ServiceManagement/ServiceManagement.h>
+#import <UserNotifications/UserNotifications.h>
 #include <libproc.h>
 #include <sys/proc_info.h>
 #import "AppDelegate.h"
@@ -60,7 +61,10 @@ int vFixChromiumBrowser = 0; //new on version 2.0
 extern int convertToolHotKey;
 extern bool convertToolDontAlertWhenCompleted;
 
-@interface AppDelegate ()
+#define SECURE_INPUT_NOTIFY_DELAY 10 //seconds; short password typing should not show a notification
+#define SECURE_INPUT_NOTIFICATION @"SecureInput"
+
+@interface AppDelegate () <UNUserNotificationCenterDelegate>
 
 @end
 
@@ -98,6 +102,14 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     NSMenuItem* mnuVietnameseLocaleCP1258;
     
     NSMenuItem* mnuQuickConvert;
+
+    //Secure Input
+    NSMenuItem* mnuSecureInput;
+    NSMenuItem* mnuSecureInputSeparator;
+    BOOL _secureInputOn;
+    pid_t _secureInputPID;
+    NSDate* _secureInputSince;
+    BOOL _secureInputNotified;
 }
 
 -(void)askPermission {
@@ -166,6 +178,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         NSBeep();
 
     [self createStatusBarMenu];
+    [self startSecureInputCheck];
     
     //init
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -214,6 +227,16 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     theMenu = [[NSMenu alloc] initWithTitle:@""];
     [theMenu setAutoenablesItems:NO];
     
+    //only shown while Secure Input blocks typing
+    mnuSecureInput = [theMenu addItemWithTitle:@"" action:@selector(onSecureInputSelected) keyEquivalent:@""];
+    if (@available(macOS 11.0, *)) {
+        mnuSecureInput.image = [NSImage imageWithSystemSymbolName:@"lock.fill" accessibilityDescription:nil];
+    }
+    mnuSecureInput.hidden = YES;
+    mnuSecureInputSeparator = [NSMenuItem separatorItem];
+    mnuSecureInputSeparator.hidden = YES;
+    [theMenu addItem:mnuSecureInputSeparator];
+
     menuInputMethod = [theMenu addItemWithTitle:@"Bật Tiếng Việt"
                                                      action:@selector(onInputMethodSelected)
                                               keyEquivalent:@""];
@@ -371,19 +394,9 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 - (void) fillData {
     //fill data
     NSInteger intInputMethod = [[NSUserDefaults standardUserDefaults] integerForKey:@"InputMethod"];
-    NSInteger grayIcon = [[NSUserDefaults standardUserDefaults] integerForKey:@"GrayIcon"];
-    if (intInputMethod == 1) {
-        [menuInputMethod setState:NSControlStateValueOn];
-        statusItem.button.image = [NSImage imageNamed:@"Status"];
-        [statusItem.button.image setTemplate:(grayIcon ? YES : NO)];
-        statusItem.button.alternateImage = [NSImage imageNamed:@"StatusHighlighted"];
-    } else {
-        [menuInputMethod setState:NSControlStateValueOff];
-        statusItem.button.image = [NSImage imageNamed:@"StatusEng"];
-        [statusItem.button.image setTemplate:(grayIcon ? YES : NO)];
-        statusItem.button.alternateImage = [NSImage imageNamed:@"StatusHighlightedEng"];
-    }
+    [menuInputMethod setState:(intInputMethod == 1 ? NSControlStateValueOn : NSControlStateValueOff)];
     vLanguage = (int)intInputMethod;
+    [self updateStatusIcon];
     
     NSInteger intInputType = [[NSUserDefaults standardUserDefaults] integerForKey:@"InputType"];
     [mnuTelex setState:NSControlStateValueOff];
@@ -429,6 +442,27 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     NSInteger intRunOnStartup = [[NSUserDefaults standardUserDefaults] integerForKey:@"RunOnStartup"];
     [self setRunOnStartup:intRunOnStartup ? YES : NO];
 
+}
+
+-(void)updateStatusIcon {
+    //Secure Input blocks typing: show a lock until it is turned off
+    if (_secureInputOn) {
+        if (@available(macOS 11.0, *)) {
+            statusItem.button.image = [NSImage imageWithSystemSymbolName:@"lock.fill" accessibilityDescription:@"Secure Input"];
+            statusItem.button.alternateImage = nil;
+            return;
+        }
+    }
+    NSInteger grayIcon = [[NSUserDefaults standardUserDefaults] integerForKey:@"GrayIcon"];
+    if (vLanguage == 1) {
+        statusItem.button.image = [NSImage imageNamed:@"Status"];
+        [statusItem.button.image setTemplate:(grayIcon ? YES : NO)];
+        statusItem.button.alternateImage = [NSImage imageNamed:@"StatusHighlighted"];
+    } else {
+        statusItem.button.image = [NSImage imageNamed:@"StatusEng"];
+        [statusItem.button.image setTemplate:(grayIcon ? YES : NO)];
+        statusItem.button.alternateImage = [NSImage imageNamed:@"StatusHighlightedEng"];
+    }
 }
 
 -(void)onImputMethodChanged:(BOOL)willNotify {
@@ -532,6 +566,133 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
     [_aboutWC.window makeKeyAndOrderFront:nil];
     [_aboutWC.window setLevel:NSFloatingWindowLevel];
+}
+
+#pragma mark -Secure Input
+//While an app turns on Secure Input (password field, Terminal "Secure Keyboard Entry",...),
+//macOS does not send keys to any input method, so OpenKey can not type. Tell the user why.
+-(void)startSecureInputCheck {
+    if (@available(macOS 10.14, *)) {
+        [UNUserNotificationCenter currentNotificationCenter].delegate = self;
+    }
+    //there is no notification for Secure Input changes, so check it often (it is a cheap call)
+    NSTimer* timer = [NSTimer timerWithTimeInterval:1.0 target:self selector:@selector(checkSecureInput) userInfo:nil repeats:YES];
+    timer.tolerance = 0.5;
+    [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+    [self checkSecureInput];
+}
+
+-(void)checkSecureInput {
+    BOOL on = IsSecureEventInputEnabled();
+    pid_t pid = 0;
+    if (on) {
+        NSDictionary* session = CFBridgingRelease(CGSessionCopyCurrentDictionary());
+        pid = [[session objectForKey:@"kCGSSessionSecureInputPID"] intValue];
+    }
+
+    if (on != _secureInputOn || pid != _secureInputPID) {
+        _secureInputOn = on;
+        _secureInputPID = pid;
+        _secureInputSince = [NSDate date];
+        _secureInputNotified = NO;
+
+        NSString* appName = [self secureInputAppName];
+        mnuSecureInput.title = appName ? [NSString stringWithFormat:@"Không gõ được: %@ đang bật Secure Input", appName]
+                                       : @"Không gõ được: Secure Input đang bật";
+        mnuSecureInput.hidden = !on;
+        mnuSecureInputSeparator.hidden = !on;
+        statusItem.button.toolTip = on ? mnuSecureInput.title : nil;
+        [self updateStatusIcon];
+
+        if (!on) {
+            if (@available(macOS 10.14, *)) {
+                [[UNUserNotificationCenter currentNotificationCenter] removeDeliveredNotificationsWithIdentifiers:@[SECURE_INPUT_NOTIFICATION]];
+            }
+        }
+    }
+
+    //notify only in Vietnamese mode: in English mode typing still works
+    if (on && !_secureInputNotified && vLanguage == 1 &&
+        -[_secureInputSince timeIntervalSinceNow] >= SECURE_INPUT_NOTIFY_DELAY) {
+        _secureInputNotified = YES;
+        [self notifySecureInput];
+    }
+}
+
+//name of the app which turns on Secure Input, nil if unknown
+-(NSString*)secureInputAppName {
+    if (_secureInputPID <= 0)
+        return nil;
+    NSString* name = [NSRunningApplication runningApplicationWithProcessIdentifier:_secureInputPID].localizedName;
+    if (name.length > 0)
+        return name;
+    //not a normal app, such as loginwindow
+    char procName[256];
+    if (proc_name(_secureInputPID, procName, sizeof(procName)) > 0)
+        return [NSString stringWithUTF8String:procName];
+    return nil;
+}
+
+-(void)notifySecureInput {
+    if (@available(macOS 10.14, *)) {
+        NSString* appName = [self secureInputAppName];
+        UNUserNotificationCenter* center = [UNUserNotificationCenter currentNotificationCenter];
+        [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert completionHandler:^(BOOL granted, NSError* error) {
+            if (!granted)
+                return;
+            UNMutableNotificationContent* content = [[UNMutableNotificationContent alloc] init];
+            content.title = @"OpenKey không gõ được tiếng Việt";
+            content.body = appName ? [NSString stringWithFormat:@"%@ đang bật Secure Input. Bấm để xem cách khắc phục.", appName]
+                                   : @"Secure Input đang bật. Bấm để xem cách khắc phục.";
+            UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:SECURE_INPUT_NOTIFICATION content:content trigger:nil];
+            [center addNotificationRequest:request withCompletionHandler:nil];
+        }];
+    }
+}
+
+-(void)onSecureInputSelected {
+    if (!_secureInputOn)
+        return;
+    NSString* appName = [self secureInputAppName];
+    NSRunningApplication* app = _secureInputPID > 0 ? [NSRunningApplication runningApplicationWithProcessIdentifier:_secureInputPID] : nil;
+
+    NSAlert *alert = [[NSAlert alloc] init];
+    [alert setMessageText:appName ? [NSString stringWithFormat:@"%@ đang bật Secure Input", appName] : @"Secure Input đang bật"];
+    [alert setInformativeText:@"Khi Secure Input bật, macOS không gửi phím cho bộ gõ, nên OpenKey tạm thời không gõ được tiếng Việt. "
+                              @"Đây là tính năng bảo mật của macOS, thường bật khi bạn nhập mật khẩu.\n\n"
+                              @"Cách khắc phục:\n"
+                              @"• Rời khỏi ô mật khẩu, hoặc chuyển sang ứng dụng khác.\n"
+                              @"• Terminal, iTerm: tắt \"Secure Keyboard Entry\" trong menu của ứng dụng.\n"
+                              @"• Nếu vẫn bị (nhất là với loginwindow): khoá màn hình rồi mở khoá lại."];
+    [alert addButtonWithTitle:@"OK"];
+    BOOL canOpenApp = app != nil && app.activationPolicy == NSApplicationActivationPolicyRegular;
+    if (canOpenApp)
+        [alert addButtonWithTitle:[NSString stringWithFormat:@"Mở %@", appName]];
+
+    [alert.window makeKeyAndOrderFront:nil];
+    [alert.window setLevel:NSStatusWindowLevel];
+    if ([alert runModal] == NSAlertSecondButtonReturn && canOpenApp)
+        [app activateWithOptions:0];
+}
+
+//show the banner even when OpenKey is the active app
+-(void)userNotificationCenter:(UNUserNotificationCenter *)center willPresentNotification:(UNNotification *)notification
+        withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler API_AVAILABLE(macos(10.14)) {
+    if (@available(macOS 11.0, *)) {
+        completionHandler(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList);
+    } else {
+        completionHandler(UNNotificationPresentationOptionNone);
+    }
+}
+
+-(void)userNotificationCenter:(UNUserNotificationCenter *)center didReceiveNotificationResponse:(UNNotificationResponse *)response
+        withCompletionHandler:(void (^)(void))completionHandler API_AVAILABLE(macos(10.14)) {
+    if ([response.notification.request.identifier isEqualToString:SECURE_INPUT_NOTIFICATION]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self onSecureInputSelected];
+        });
+    }
+    completionHandler();
 }
 
 #pragma mark -Short key event

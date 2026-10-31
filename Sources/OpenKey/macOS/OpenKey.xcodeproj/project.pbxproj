@@ -44,6 +44,7 @@
 		23E2E4A02314FD3A006CCC3E /* Vietnamese.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 23E2E49B2314FD3A006CCC3E /* Vietnamese.cpp */; };
 		23F512852336386200397988 /* MJAccessibilityUtils.m in Sources */ = {isa = PBXBuildFile; fileRef = 23F512832336386200397988 /* MJAccessibilityUtils.m */; };
 		A534F32629D8B78100296F25 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23874B0F220160A500000BC8 /* Carbon.framework */; };
+		A5C0FFEE2A00000000000002 /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000001 /* UserNotifications.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -106,6 +107,7 @@
 		238519FB21F1BF4900E79A41 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
 		238519FD21F1BF5100E79A41 /* EventKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = EventKit.framework; path = System/Library/Frameworks/EventKit.framework; sourceTree = SDKROOT; };
 		23874B0F220160A500000BC8 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
+		A5C0FFEE2A00000000000001 /* UserNotifications.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UserNotifications.framework; path = System/Library/Frameworks/UserNotifications.framework; sourceTree = SDKROOT; };
 		2389467C21FDDB920030A13B /* OpenKeyManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = OpenKeyManager.m; sourceTree = "<group>"; };
 		2389467E21FDDC3F0030A13B /* OpenKeyManager.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = OpenKeyManager.h; sourceTree = "<group>"; };
 		238AF96422042C1600AEFA17 /* OK@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "OK@2x.png"; sourceTree = "<group>"; };
@@ -142,6 +144,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A534F32629D8B78100296F25 /* Carbon.framework in Frameworks */,
+				A5C0FFEE2A00000000000002 /* UserNotifications.framework in Frameworks */,
 				233C4A6E231F923D00DD7052 /* AppKit.framework in Frameworks */,
 				23963B5022040C720097189E /* ServiceManagement.framework in Frameworks */,
 				23851A0121F1C1A400E79A41 /* CoreGraphics.framework in Frameworks */,
@@ -273,6 +276,7 @@
 				23A984BE220ED07E000914A2 /* IOKit.framework */,
 				23963B4F22040C720097189E /* ServiceManagement.framework */,
 				23874B0F220160A500000BC8 /* Carbon.framework */,
+				A5C0FFEE2A00000000000001 /* UserNotifications.framework */,
 				238519FD21F1BF5100E79A41 /* EventKit.framework */,
 				238519FB21F1BF4900E79A41 /* Cocoa.framework */,
 				238519F921F1BF4400E79A41 /* CoreGraphics.framework */,
