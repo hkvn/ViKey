@@ -55,17 +55,7 @@ struct TypingSettingsView: View {
 
             Section("Phím tắt") {
                 LabeledContent("Chuyển Tiếng Việt / English") {
-                    HStack(spacing: 4) {
-                        Toggle("⌃", isOn: model.switchKeyBinding(.control)).help("Control")
-                        Toggle("⌥", isOn: model.switchKeyBinding(.option)).help("Option")
-                        Toggle("⇧", isOn: model.switchKeyBinding(.shift)).help("Shift")
-                        Toggle("⌘", isOn: model.switchKeyBinding(.command)).help("Command")
-                        Text("+").foregroundColor(.secondary)
-                        KeyRecorder(title: model.switchKeyTitle) { keyCode, character in
-                            model.setSwitchKey(keyCode: keyCode, character: character)
-                        }
-                    }
-                    .toggleStyle(.button)
+                    HotKeyEditor(status: model.switchKeyStatusBinding)
                 }
                 OptionToggle(title: "Kêu beep khi chuyển", isOn: model.switchKeyBinding(.beep))
                 OptionToggle(title: "Tạm tắt ViKey bằng phím ⌘", isOn: model.binding(.tempOffOpenKey))
@@ -140,6 +130,113 @@ struct MacroSettingsView: View {
         .formStyle(.grouped)
         .toggleStyle(.switch)
         .frame(width: settingsTabWidth)
+    }
+}
+
+//MARK: - Ứng dụng
+struct AppsSettingsView: View {
+    @ObservedObject var apps: AppsModel
+    @State private var confirmForgetAll = false
+    private let codeTables = OpenKeyManager.getTableCodes() as? [String] ?? []
+
+    var body: some View {
+        Form {
+            Section {
+                if apps.excludedApps.isEmpty {
+                    Text("Chưa có ứng dụng nào.").foregroundColor(.secondary)
+                }
+                ForEach(apps.excludedApps) { app in
+                    HStack {
+                        AppLabel(app: app)
+                        Spacer()
+                        RemoveButton(help: "Bỏ khỏi danh sách") { apps.removeExcludedApp(app.bundleId) }
+                    }
+                }
+                Button("Thêm ứng dụng…") { apps.addExcludedApps() }
+            } header: {
+                Text("Luôn dùng English")
+            } footer: {
+                Text("ViKey không gõ tiếng Việt trong các ứng dụng này, ví dụ Terminal, trò chơi, trình soạn code.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section {
+                if apps.rememberedApps.isEmpty {
+                    Text("Chưa có ứng dụng nào.").foregroundColor(.secondary)
+                }
+                ForEach(apps.rememberedApps) { app in
+                    HStack {
+                        AppLabel(app: app)
+                        Spacer()
+                        Picker("Chế độ gõ", selection: apps.languageBinding(for: app.bundleId)) {
+                            Text("Tiếng Việt").tag(1)
+                            Text("English").tag(0)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                        if vRememberCode != 0 {
+                            Picker("Bảng mã", selection: apps.codeTableBinding(for: app.bundleId)) {
+                                ForEach(codeTables.indices, id: \.self) { index in
+                                    Text(codeTables[index]).tag(index)
+                                }
+                            }
+                            .labelsHidden()
+                            .fixedSize()
+                        }
+                        RemoveButton(help: "Quên ứng dụng này") { apps.forget(app.bundleId) }
+                    }
+                }
+                if !apps.rememberedApps.isEmpty {
+                    Button("Quên tất cả…") { confirmForgetAll = true }
+                }
+            } header: {
+                Text("Ứng dụng đã ghi nhớ")
+            } footer: {
+                Text("Khi bật \"Chuyển chế độ thông minh\" (tab Bộ gõ), ViKey nhớ Tiếng Việt / English cho từng ứng dụng, và cả bảng mã nếu bật \"Tự ghi nhớ bảng mã theo ứng dụng\".")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        //the lists can be long: fixed height, the form scrolls
+        .frame(width: settingsTabWidth, height: 520)
+        .alert("Quên tất cả ứng dụng?", isPresented: $confirmForgetAll) {
+            Button("Quên tất cả", role: .destructive) { apps.forgetAll() }
+            Button("Huỷ", role: .cancel) {}
+        } message: {
+            Text("ViKey sẽ ghi nhớ lại khi bạn dùng các ứng dụng.")
+        }
+    }
+}
+
+/// icon and name of an app
+private struct AppLabel: View {
+    let app: AppEntry
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let icon = app.icon {
+                Image(nsImage: icon).resizable().frame(width: 20, height: 20)
+            } else {
+                Image(systemName: "questionmark.app.dashed").frame(width: 20, height: 20).foregroundColor(.secondary)
+            }
+            Text(app.name).lineLimit(1)
+        }
+        .help(app.bundleId)
+    }
+}
+
+private struct RemoveButton: View {
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "minus.circle.fill").foregroundColor(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .help(help)
     }
 }
 
@@ -252,6 +349,32 @@ struct AboutSettingsView: View {
     }
 }
 
+//MARK: - Hotkey
+/// modifier keys and a key of a hotkey, see HotKey
+struct HotKeyEditor: View {
+    @Binding var status: Int32
+
+    var body: some View {
+        HStack(spacing: 4) {
+            flagToggle("⌃", .control, help: "Control")
+            flagToggle("⌥", .option, help: "Option")
+            flagToggle("⇧", .shift, help: "Shift")
+            flagToggle("⌘", .command, help: "Command")
+            Text("+").foregroundColor(.secondary)
+            KeyRecorder(title: HotKey.title(of: status)) { keyCode, character in
+                status = HotKey.with(keyCode: keyCode, character: character, in: status)
+            }
+        }
+        .toggleStyle(.button)
+    }
+
+    private func flagToggle(_ symbol: String, _ flag: SwitchKeyFlag, help: String) -> some View {
+        Toggle(symbol, isOn: Binding(get: { status & flag.rawValue != 0 },
+                                     set: { status = HotKey.with(flag, on: $0, in: status) }))
+            .help(help)
+    }
+}
+
 //MARK: - Key recorder
 /// Button which records the next key press. Delete clears the key (modifier keys only), Escape cancels.
 struct KeyRecorder: View {
@@ -276,7 +399,7 @@ struct KeyRecorder: View {
             case kVK_Escape:
                 break
             case kVK_Delete, kVK_ForwardDelete:
-                onKey(SettingsModel.noKey, SettingsModel.noKey)
+                onKey(HotKey.noKey, HotKey.noKey)
             case kVK_Space:
                 onKey(UInt16(kVK_Space), UInt16(kVK_Space))
             default:

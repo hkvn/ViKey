@@ -214,8 +214,40 @@ static void testMacro() {
     vUseMacro = 0;
 }
 
+static void testAppMemory() {
+    initSmartSwitchKey(nullptr, 0);
+    //status: bit 0 Vietnamese, other bits code table
+    check("new app is unknown", getAppInputMethodStatus("com.apple.Terminal", 1) == -1);
+    check("new app gets the current status", getAppInputMethodStatus("com.apple.Terminal", 1) == 1);
+    setAppInputMethodStatus("com.apple.Terminal", 0 | (2 << 1));
+    check("status changed", getAppInputMethodStatus("com.apple.Terminal", 1) == 4);
+    setAppInputMethodStatus("com.google.Chrome", 1);
+
+    vector<string> bundleIds;
+    vector<int> statuses;
+    getAllAppInputMethodStatus(bundleIds, statuses);
+    check("list has two apps", bundleIds.size() == 2 && statuses.size() == 2);
+    check("list content", bundleIds.size() == 2 && bundleIds[0] == "com.apple.Terminal" && statuses[0] == 4 &&
+          bundleIds[1] == "com.google.Chrome" && statuses[1] == 1);
+
+    //save and load
+    vector<Byte> saved;
+    getSmartSwitchKeySaveData(saved);
+    initSmartSwitchKey(saved.data(), (int)saved.size());
+    check("status kept after save and load", getAppInputMethodStatus("com.apple.Terminal", 1) == 4);
+
+    //the last answer is cached: forgetting the app must clear it
+    removeAppInputMethodStatus("com.apple.Terminal");
+    check("forgotten app is unknown again", getAppInputMethodStatus("com.apple.Terminal", 1) == -1);
+    removeAppInputMethodStatus("com.apple.Terminal");
+    removeAppInputMethodStatus("com.google.Chrome");
+    getAllAppInputMethodStatus(bundleIds, statuses);
+    check("list is empty", bundleIds.empty());
+}
+
 int main() {
     pData = (vKeyHookState*)vKeyInit();
+    testAppMemory();
     testTelex();
     testSpelling();
     testOrthography();

@@ -109,6 +109,25 @@ extern "C" {
         UpdateInputSourceLanguage();
     }
     
+    //apps where ViKey always types English (Terminal, games,...), see VKExcludedApps
+    NSSet<NSString*>* _excludedApps = nil;
+    bool _isExcludedAppActive = false;
+    
+    //call when the frontmost app changes
+    void UpdateExcludedApp() {
+        NSString* app = FRONT_APP;
+        _isExcludedAppActive = app != nil && [_excludedApps containsObject:app];
+    }
+    
+    void ReloadExcludedApps() {
+        _excludedApps = [NSSet setWithArray:[[NSUserDefaults standardUserDefaults] stringArrayForKey:@"ExcludedApps"] ?: @[]];
+        UpdateExcludedApp();
+    }
+    
+    bool IsExcludedAppActive() {
+        return _isExcludedAppActive;
+    }
+    
     void OpenKeyInit() {
         //load saved data
         vFreeMark = 0;//(int)[[NSUserDefaults standardUserDefaults] integerForKey:@"FreeMark"];
@@ -178,6 +197,7 @@ extern "C" {
                                             CFNotificationSuspensionBehaviorDeliverImmediately);
         }
         UpdateInputSourceLanguage();
+        ReloadExcludedApps();
     }
     
     //the focus may be in another app or panel now: check the target app again
@@ -753,8 +773,8 @@ extern "C" {
         
         _proxy = proxy;
         
-        //If is in english mode
-        if (vLanguage == 0) {
+        //If is in english mode, or the app always uses English (but not Spotlight opened over it)
+        if (vLanguage == 0 || (_isExcludedAppActive && ![getTargetApp() isEqualToString:@"com.apple.Spotlight"])) {
             if (vUseMacro && vUseMacroInEnglishMode && type == kCGEventKeyDown) {
                 vEnglishMode((type == kCGEventKeyDown ? vKeyEventState::KeyDown : vKeyEventState::MouseDown),
                              _keycode,

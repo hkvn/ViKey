@@ -7,6 +7,8 @@
 
 #import "AppDelegate.h"
 #import "OpenKeyManager.h"
+#import "EngineBridge.h"
+#import "MJAccessibilityUtils.h"
 
 //options, see document in Engine.h; defined in AppDelegate.m
 extern int vLanguage;

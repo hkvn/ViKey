@@ -24,6 +24,8 @@ extern void OnInputMethodChanged(void);
 extern void RequestNewSession(void);
 extern void OnActiveAppChanged(void);
 extern void InvalidateTargetApp(void);
+extern void UpdateExcludedApp(void);
+extern bool IsExcludedAppActive(void);
 
 //see document in Engine.h
 int vLanguage = 1;
@@ -83,8 +85,10 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
 @implementation AppDelegate {
     SettingsWindowController *_settingsWC;
-    NSWindowController *_macroWC;
-    NSWindowController *_convertWC;
+    MacroWindowController *_macroWC;
+    ConvertToolWindowController *_convertWC;
+    WelcomeWindowController *_welcomeWC;
+    BOOL _started;
     
     NSStatusItem *statusItem;
     NSMenu *theMenu;
@@ -114,24 +118,34 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     BOOL _secureInputNotified;
 }
 
--(void)askPermission {
+//no Accessibility permission yet: the welcome window waits for it, then ViKey starts without a restart
+-(void)showWelcome {
+    if (_welcomeWC == nil) {
+        __weak AppDelegate* weakSelf = self;
+        _welcomeWC = [[WelcomeWindowController alloc] initOnGranted:^{
+            [weakSelf startViKey];
+        }];
+    }
+    [_welcomeWC show];
+}
+
+//the permission is granted but macOS does not send the keys yet: ViKey must be opened again
+-(void)askToRelaunch {
     NSAlert *alert = [[NSAlert alloc] init];
-    [alert setMessageText: [NSString stringWithFormat:@"ViKey cần bạn cấp quyền để có thể hoạt động!"]];
-    [alert setInformativeText:@"Vui lòng chạy lại ứng dụng sau khi cấp quyền."];
-
-    [alert addButtonWithTitle:@"Không"];
-    [alert addButtonWithTitle:@"Cấp quyền"];
-
+    [alert setMessageText:@"Cần mở lại ViKey"];
+    [alert setInformativeText:@"ViKey đã có quyền nhưng chưa nhận được phím gõ. Hãy mở lại ViKey để bắt đầu gõ."];
+    [alert addButtonWithTitle:@"Mở lại ViKey"];
+    [alert addButtonWithTitle:@"Thoát"];
     [alert.window makeKeyAndOrderFront:nil];
     [alert.window setLevel:NSStatusWindowLevel];
-
-    NSModalResponse res = [alert runModal];
-
-    if (res == 1001) {
-        MJAccessibilityOpenPanel();
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
+        //open again after this process quits: a new ViKey quits when an older one is still running
+        NSTask* task = [[NSTask alloc] init];
+        task.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+        task.arguments = @[@"-c", @"sleep 1; /usr/bin/open \"$0\"", [[NSBundle mainBundle] bundlePath]];
+        [task launchAndReturnError:nil];
     }
-
-    [NSApp terminate:0];
+    [NSApp terminate:nil];
 }
 
 //on the first launch, copy the settings of OpenKey (macros, hotkey, options,...)
@@ -199,9 +213,16 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     
     // check if user granted Accessabilty permission
     if (!MJAccessibilityIsEnabled()) {
-        [self askPermission];
+        [self showWelcome];
         return;
     }
+    [self startViKey];
+}
+
+-(void)startViKey {
+    if (_started)
+        return;
+    _started = YES;
     [self askToQuitOpenKey];
     
     vShowIconOnDock = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"vShowIconOnDock"];
@@ -217,7 +238,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     //init
     dispatch_async(dispatch_get_main_queue(), ^{
         if (![OpenKeyManager initEventTap]) {
-            [self onControlPanelSelected];
+            [self askToRelaunch];
         } else {
             NSInteger showui = [[NSUserDefaults standardUserDefaults] integerForKey:@"ShowUIOnStartup"];
             if (showui == 1) {
@@ -244,7 +265,10 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
-    [self onControlPanelSelected];
+    if (_started)
+        [self onControlPanelSelected];
+    else
+        [self showWelcome];
     return YES;
 }
 
@@ -498,7 +522,8 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         }
     }
     NSInteger grayIcon = [[NSUserDefaults standardUserDefaults] integerForKey:@"GrayIcon"];
-    if (vLanguage == 1) {
+    //apps which always use English show the English icon
+    if (vLanguage == 1 && !IsExcludedAppActive()) {
         statusItem.button.image = [NSImage imageNamed:@"Status"];
         [statusItem.button.image setTemplate:(grayIcon ? YES : NO)];
         statusItem.button.alternateImage = [NSImage imageNamed:@"StatusHighlighted"];
@@ -554,13 +579,9 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
 -(void)onConvertTool {
     if (_convertWC == nil) {
-        _convertWC = [[NSStoryboard storyboardWithName:@"Main" bundle:nil] instantiateControllerWithIdentifier:@"ConvertWindow"];
+        _convertWC = [[ConvertToolWindowController alloc] init];
     }
-    //[OpenKeyManager showDockIcon:YES];
-    if ([_convertWC.window isVisible])
-        return;
-    [_convertWC.window makeKeyAndOrderFront:nil];
-    [_convertWC.window setLevel:NSFloatingWindowLevel];
+    [_convertWC show];
 }
 
 -(void)onQuickConvert {
@@ -586,14 +607,9 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
 -(void) onMacroSelected {
     if (_macroWC == nil) {
-        _macroWC = [[NSStoryboard storyboardWithName:@"Main" bundle:nil] instantiateControllerWithIdentifier:@"MacroWindow"];
+        _macroWC = [[MacroWindowController alloc] init];
     }
-    //[OpenKeyManager showDockIcon:YES];
-    if ([_macroWC.window isVisible])
-        return;
-    
-    [_macroWC.window makeKeyAndOrderFront:nil];
-    [_macroWC.window setLevel:NSFloatingWindowLevel];
+    [_macroWC show];
 }
 
 -(void) onAboutSelected {
@@ -747,6 +763,8 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
 -(void)activeAppChanged: (NSNotification*)note {
     InvalidateTargetApp();
+    UpdateExcludedApp();
+    [self updateStatusIcon];
     if (vUseSmartSwitchKey && [OpenKeyManager isInited]) {
         OnActiveAppChanged();
     }

@@ -21,6 +21,9 @@ ViKey dùng kỹ thuật `Backspace`, không bị lỗi gạch chân như bộ g
 - Kiểm tra bản mới qua GitHub Releases của ViKey.
 - Khởi động cùng macOS hoạt động trở lại (dùng SMAppService, không cần ứng dụng phụ).
 - Tự chép cài đặt (gõ tắt, phím tắt, tuỳ chọn) từ OpenKey ở lần chạy đầu.
+- Lần đầu mở: cửa sổ hướng dẫn cấp quyền, ViKey tự chạy ngay khi có quyền, không cần mở lại.
+- Tab **Ứng dụng**: chọn các ứng dụng luôn dùng English, xem và sửa chế độ gõ, bảng mã ViKey nhớ cho từng ứng dụng.
+- Cửa sổ Gõ tắt (có tìm kiếm) và Công cụ chuyển mã mới.
 - Sửa nhiều lỗi: chuyển mã ký tự cuối, chữ hoa khi chuyển mã, chính tả "uych", gõ trong Spotlight, bộ gõ bị tắt sau khi chuyển mã nhanh,...
 
 ## Tính năng
@@ -35,6 +38,10 @@ ViKey dùng kỹ thuật `Backspace`, không bị lỗi gạch chân như bộ g
 - Tự ghi nhớ bảng mã theo ứng dụng, hợp với Photoshop, CAD,... dùng VNI hoặc TCVN3.
 - Tự tắt tiếng Việt khi bộ gõ hệ thống không phải tiếng Anh.
 
+**Ứng dụng**
+- Luôn dùng English trong các ứng dụng bạn chọn (Terminal, trò chơi, trình soạn code,...).
+- Xem, sửa hoặc quên chế độ gõ và bảng mã ViKey đã nhớ cho từng ứng dụng.
+
 **Chính tả**
 - Kiểm tra chính tả, tự khôi phục phím khi từ không phải tiếng Việt.
 - Cho phép "z w j f" làm phụ âm, tạm tắt chính tả bằng phím ⌃.
@@ -42,7 +49,7 @@ ViKey dùng kỹ thuật `Backspace`, không bị lỗi gạch chân như bộ g
 - Viết hoa chữ cái đầu câu.
 
 **Gõ tắt**
-- Gõ tắt không giới hạn độ dài (gõ tắt của macOS chỉ tới 20 ký tự), nhập / xuất danh sách ra file.
+- Gõ tắt không giới hạn độ dài (gõ tắt của macOS chỉ tới 20 ký tự), tìm kiếm, nhập / xuất danh sách ra file.
 - Dùng gõ tắt cả khi tắt tiếng Việt, tự viết hoa theo phím tắt.
 - Gõ nhanh phụ âm đôi: cc → ch, gg → gi, kk → kh, nn → ng, qq → qu, pp → ph, tt → th.
 - Gõ tắt phụ âm đầu (f → ph, j → gi, w → qu) và phụ âm cuối (g → ng, h → nh, k → ch).
@@ -58,7 +65,7 @@ ViKey dùng kỹ thuật `Backspace`, không bị lỗi gạch chân như bộ g
 ## Cài đặt
 1. Tải file `ViKey-x.y.z.dmg` mới nhất từ [trang phát hành](https://github.com/hkvn/ViKey/releases/latest), mở ra và kéo `ViKey.app` vào thư mục Applications.
 2. Lần đầu mở, nếu macOS chặn ứng dụng: vào *System Settings → Privacy & Security*, bấm **Open Anyway**. (ViKey được ký số nhưng chưa được Apple notarize.)
-3. ViKey cần quyền Accessibility: vào *System Settings → Privacy & Security → Accessibility* và bật `ViKey`. **Không tắt quyền này khi đang dùng ViKey.**
+3. ViKey cần quyền Accessibility (Trợ năng). Lần đầu mở, ViKey hiện cửa sổ hướng dẫn: bấm **Cấp quyền…**, bật `ViKey` trong *System Settings → Privacy & Security → Accessibility*, rồi quay lại, ViKey tự chạy. **Không tắt quyền này khi đang dùng ViKey.**
 
 Nếu bạn chuyển từ OpenKey sang: ViKey tự chép cài đặt của OpenKey ở lần chạy đầu và đề nghị thoát OpenKey nếu nó đang chạy.
 
@@ -74,7 +81,7 @@ Danh sách các phiên bản: [Releases](https://github.com/hkvn/ViKey/releases)
 
 ## Phát triển
 - Build từ mã nguồn và tạo bản phát hành: xem [macOS_Build.md](macOS_Build.md).
-- Mã nguồn bản Windows và Linux của OpenKey vẫn nằm trong thư mục `Sources/OpenKey`, nhưng ViKey hiện chỉ phát triển bản macOS.
+- ViKey chỉ phát triển bản macOS. Mã nguồn bản Windows và Linux có trong [kho OpenKey](https://github.com/tuyenvm/OpenKey).
 
 ## Giấy phép
 ViKey là phần mềm nguồn mở theo giấy phép [GPL-3.0](LICENSE), phát triển tiếp từ OpenKey © Mai Vũ Tuyên. Nếu bạn phân phối lại bản sửa đổi, bản đó cũng phải là nguồn mở và ghi rõ nguồn gốc.

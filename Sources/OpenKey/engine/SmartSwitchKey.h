@@ -35,4 +35,14 @@ int getAppInputMethodStatus(const string& bundleId, const int& currentInputMetho
  */
 void setAppInputMethodStatus(const string& bundleId, const int& language);
 
+/**
+ * all saved apps and their status (bit 0: language, other bits: code table)
+ */
+void getAllAppInputMethodStatus(vector<string>& bundleIds, vector<int>& statuses);
+
+/**
+ * forget the saved status of this @bundleId
+ */
+void removeAppInputMethodStatus(const string& bundleId);
+
 #endif /* SmartSwitchKey_h */

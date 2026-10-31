@@ -14,8 +14,7 @@
 
 -(void)onImputMethodChanged:(BOOL)willNotify;
 -(void)onInputMethodSelected;
-
--(void)askPermission;
+-(void)updateStatusIcon;
 
 -(void)onInputTypeSelectedIndex:(int)index;
 -(void)onCodeTableChanged:(int)index;

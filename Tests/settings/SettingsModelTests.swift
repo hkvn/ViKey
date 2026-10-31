@@ -46,7 +46,7 @@ struct SettingsModelTests {
 
         model.switchKeyBinding(.control).wrappedValue = true
         model.switchKeyBinding(.shift).wrappedValue = true
-        model.setSwitchKey(keyCode: SettingsModel.noKey, character: SettingsModel.noKey)
+        model.setSwitchKey(keyCode: HotKey.noKey, character: HotKey.noKey)
         check("control + option + shift, no key is 0xFE000BFE", UInt32(bitPattern: vSwitchKeyStatus) == 0xFE000BFE)
         check("title of no key", model.switchKeyTitle == "Không")
         model.setSwitchKey(keyCode: 49, character: 49)
@@ -71,6 +71,24 @@ struct SettingsModelTests {
         model.reload()
         check("reload reads the saved value", model[.checkSpelling] == false)
         check("reload does not change the engine", vCheckSpelling == 1)
+
+        //per-app memory, status bit 0: Vietnamese, other bits: code table
+        VKAppMemory.removeAllApps()
+        VKAppMemory.setStatus(1, forApp: "com.apple.TextEdit")
+        let apps = AppsModel()
+        check("remembered app is listed", apps.rememberedApps.map(\.bundleId) == ["com.apple.TextEdit"])
+        check("app mode is Vietnamese", apps.languageBinding(for: "com.apple.TextEdit").wrappedValue == 1)
+        apps.codeTableBinding(for: "com.apple.TextEdit").wrappedValue = 2
+        check("code table keeps the mode", VKAppMemory.allApps()["com.apple.TextEdit"]?.intValue == 1 | 2 << 1)
+        apps.languageBinding(for: "com.apple.TextEdit").wrappedValue = 0
+        check("mode keeps the code table", VKAppMemory.allApps()["com.apple.TextEdit"]?.intValue == 2 << 1)
+        apps.forget("com.apple.TextEdit")
+        check("forgotten app", apps.rememberedApps.isEmpty && VKAppMemory.allApps().isEmpty)
+
+        //hotkey helper shared with the convert tool
+        check("hotkey with no key and no modifier", HotKey.title(of: Int32(bitPattern: 0xFE0000FE)) == "Không")
+        check("hotkey never set", HotKey.title(of: 0) == "Không")
+        check("hotkey option flag", HotKey.with(.option, on: true, in: 0) == 0x200 && HotKey.with(.option, on: false, in: 0x200) == 0)
 
         defaults.removePersistentDomain(forName: suiteName)
         print("settings: \(checks) checks, \(failures) failures")

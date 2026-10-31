@@ -8,13 +8,27 @@
 import AppKit
 import SwiftUI
 
+extension NSWindowController {
+    /// ViKey is a menu bar app: bring it to the front so the window is not behind other apps
+    func showInFront() {
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+    }
+}
+
 @objc final class SettingsWindowController: NSWindowController {
     /// posted when settings change outside the settings window (menu bar, smart switch,...)
     @objc static let settingsDidChangeNotification = Notification.Name("OpenKeySettingsDidChange")
 
-    @objc static let aboutTab = 4
+    @objc static let aboutTab = 5
 
     private let model = SettingsModel()
+    private let apps = AppsModel()
     private let tabs = NSTabViewController()
 
     @objc convenience init() {
@@ -24,6 +38,7 @@ import SwiftUI
         addTab(TypingSettingsView(model: model), title: "Bộ gõ", symbol: "keyboard")
         addTab(SpellingSettingsView(model: model), title: "Chính tả", symbol: "textformat.abc")
         addTab(MacroSettingsView(model: model), title: "Gõ tắt", symbol: "text.badge.plus")
+        addTab(AppsSettingsView(apps: apps), title: "Ứng dụng", symbol: "square.grid.2x2")
         addTab(SystemSettingsView(model: model), title: "Hệ thống", symbol: "gearshape")
         addTab(AboutSettingsView(), title: "Giới thiệu", symbol: "info.circle")
 
@@ -53,13 +68,7 @@ import SwiftUI
 
     @objc func show() {
         model.reload()
-        //OpenKey is a menu bar app: bring it to the front so the window is not behind other apps
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        apps.reload()
+        showInFront()
     }
 }

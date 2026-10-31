@@ -80,7 +80,7 @@ enum Option: String, CaseIterable {
     }
 }
 
-/// Bits of vSwitchKeyStatus, see Engine.h
+/// Bits of a hotkey (vSwitchKeyStatus, convertToolHotKey), see Engine.h
 enum SwitchKeyFlag: Int32 {
     case control = 0x100
     case option = 0x200
@@ -89,10 +89,38 @@ enum SwitchKeyFlag: Int32 {
     case beep = 0x8000
 }
 
-final class SettingsModel: ObservableObject {
-    static let inputTypes = ["Telex", "VNI", "Simple Telex 1", "Simple Telex 2"]
+/// A hotkey value: low byte key code, high byte character of the key (for display), middle bits SwitchKeyFlag
+enum HotKey {
     /// key code saved when the hotkey uses modifier keys only
     static let noKey: UInt16 = 0xFE
+
+    static func with(_ flag: SwitchKeyFlag, on: Bool, in status: Int32) -> Int32 {
+        on ? status | flag.rawValue : status & ~flag.rawValue
+    }
+
+    static func with(keyCode: UInt16, character: UInt16, in status: Int32) -> Int32 {
+        var value = UInt32(bitPattern: status)
+        value &= 0x00FFFF00
+        value |= UInt32(keyCode & 0xFF)
+        value |= UInt32(character & 0xFF) << 24
+        return Int32(bitPattern: value)
+    }
+
+    static func title(of status: Int32) -> String {
+        let character = UInt16((UInt32(bitPattern: status) >> 24) & 0xFF)
+        if character == noKey || character == 0 {
+            return "Không"
+        }
+        if character == UInt16(kVK_Space) {
+            return "Space"
+        }
+        guard let scalar = UnicodeScalar(character) else { return "?" }
+        return String(Character(scalar)).uppercased()
+    }
+}
+
+final class SettingsModel: ObservableObject {
+    static let inputTypes = ["Telex", "VNI", "Simple Telex 1", "Simple Telex 2"]
 
     @Published private var options: [Option: Bool] = [:]
     @Published private(set) var language = 1
@@ -174,35 +202,20 @@ final class SettingsModel: ObservableObject {
     //MARK: hotkey to switch Vietnamese / English
     func switchKeyBinding(_ flag: SwitchKeyFlag) -> Binding<Bool> {
         Binding(get: { self.switchKeyStatus & flag.rawValue != 0 }, set: { on in
-            var status = self.switchKeyStatus
-            if on {
-                status |= flag.rawValue
-            } else {
-                status &= ~flag.rawValue
-            }
-            self.saveSwitchKeyStatus(status)
+            self.saveSwitchKeyStatus(HotKey.with(flag, on: on, in: self.switchKeyStatus))
         })
     }
 
-    /// low byte: key code, high byte: character of the key (for display)
+    var switchKeyStatusBinding: Binding<Int32> {
+        Binding(get: { self.switchKeyStatus }, set: { self.saveSwitchKeyStatus($0) })
+    }
+
     func setSwitchKey(keyCode: UInt16, character: UInt16) {
-        var status = UInt32(bitPattern: switchKeyStatus)
-        status &= 0x00FFFF00
-        status |= UInt32(keyCode & 0xFF)
-        status |= UInt32(character & 0xFF) << 24
-        saveSwitchKeyStatus(Int32(bitPattern: status))
+        saveSwitchKeyStatus(HotKey.with(keyCode: keyCode, character: character, in: switchKeyStatus))
     }
 
     var switchKeyTitle: String {
-        let character = UInt16((UInt32(bitPattern: switchKeyStatus) >> 24) & 0xFF)
-        if character == Self.noKey {
-            return "Không"
-        }
-        if character == UInt16(kVK_Space) {
-            return "Space"
-        }
-        guard let scalar = UnicodeScalar(character) else { return "?" }
-        return String(Character(scalar)).uppercased()
+        HotKey.title(of: switchKeyStatus)
     }
 
     private func saveSwitchKeyStatus(_ status: Int32) {

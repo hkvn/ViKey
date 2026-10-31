@@ -71,3 +71,19 @@ void setAppInputMethodStatus(const string& bundleId, const int& language) {
     _cacheKey = bundleId;
     _cacheData = language;
 }
+
+void getAllAppInputMethodStatus(vector<string>& bundleIds, vector<int>& statuses) {
+    bundleIds.clear();
+    statuses.clear();
+    for (std::map<string, Int8>::iterator it = _smartSwitchKeyData.begin(); it != _smartSwitchKeyData.end(); ++it) {
+        bundleIds.push_back(it->first);
+        statuses.push_back(it->second);
+    }
+}
+
+void removeAppInputMethodStatus(const string& bundleId) {
+    _smartSwitchKeyData.erase(bundleId);
+    if (_cacheKey.compare(bundleId) == 0) {
+        _cacheKey = "";
+    }
+}
