@@ -18,17 +18,20 @@ static Int8 _cacheData = 0; //use cache for faster
 
 void initSmartSwitchKey(const Byte* pData, const int& size) {
     _smartSwitchKeyData.clear();
-    if (pData == NULL) return;
+    _cacheKey = "";
+    if (pData == NULL || size < 2) return;
     Uint16 count = 0;
-    Uint32 cursor = 0;
-    if (size >= 2) {
-        memcpy(&count, pData + cursor, 2);
-        cursor+=2;
-    }
+    memcpy(&count, pData, 2);
+    size_t cursor = 2, total = (size_t)size;
     Uint8 bundleIdSize;
     Uint8 value;
     for (int i = 0; i < count; i++) {
+        //the saved data can be broken: never read after its end
+        if (cursor + 1 > total)
+            break;
         bundleIdSize = pData[cursor++];
+        if (cursor + bundleIdSize + 1 > total)
+            break;
         string bundleId((char*)pData + cursor, bundleIdSize);
         cursor += bundleIdSize;
         value = pData[cursor++];
@@ -43,6 +46,7 @@ void getSmartSwitchKeySaveData(vector<Byte>& outData) {
     outData.push_back((Byte)(count>>8));
     
     for (std::map<string, Int8>::iterator it = _smartSwitchKeyData.begin(); it != _smartSwitchKeyData.end(); ++it) {
+        //setAppInputMethodStatus keeps the size in one byte
         outData.push_back((Byte)it->first.length());
         for (int j = 0; j < it->first.length(); j++) {
             outData.push_back(it->first[j]);
@@ -62,7 +66,8 @@ int getAppInputMethodStatus(const string& bundleId, const int& currentInputMetho
     }
     _cacheKey = bundleId;
     _cacheData = currentInputMethod;
-    _smartSwitchKeyData[bundleId] = _cacheData;
+    if (!bundleId.empty() && bundleId.size() <= 255 && _smartSwitchKeyData.size() < 65535)
+        _smartSwitchKeyData[bundleId] = _cacheData;
     return -1;
 }
 
@@ -72,6 +77,10 @@ int findAppInputMethodStatus(const string& bundleId) {
 }
 
 void setAppInputMethodStatus(const string& bundleId, const int& language) {
+    //the saved data keeps the size in one byte and the count in two bytes
+    if (bundleId.empty() || bundleId.size() > 255 ||
+        (_smartSwitchKeyData.size() >= 65535 && _smartSwitchKeyData.find(bundleId) == _smartSwitchKeyData.end()))
+        return;
     _smartSwitchKeyData[bundleId] = language;
     _cacheKey = bundleId;
     _cacheData = language;

@@ -84,6 +84,7 @@ static Uint32 TypingWord[MAX_BUFF];
 static Byte _index = 0;
 static vector<Uint32> _longWordHelper; //save the word when _index >= MAX_BUFF
 static list<vector<Uint32>> _typingStates; //Aug 28th, 2019: typing helper, save long state of Typing word, can go back and modify the word
+#define MAX_TYPING_STATES 100 //words kept for going back with Delete: without a limit the list grows until Enter or a click
 vector<Uint32> _typingStatesData;
 
 /**
@@ -130,6 +131,7 @@ wstring utf8ToWideString(const string& str) {
     wstring result;
     const unsigned char* s = (const unsigned char*)str.c_str();
     while (*s != 0) {
+        static const Uint32 minimum[] = {0, 0x80, 0x800, 0x10000}; //smallest code for each number of extra bytes
         Uint32 code = *s++;
         int extra = 0;
         if (code >= 0xF0 && code < 0xF5) {
@@ -144,6 +146,7 @@ wstring utf8ToWideString(const string& str) {
         } else if (code >= 0x80) {
             code = 0xFFFD; //not a valid first byte
         }
+        int length = extra;
         for (; extra > 0; extra--) {
             if ((*s & 0xC0) != 0x80) { //missing byte, also stops at NUL
                 code = 0xFFFD;
@@ -151,7 +154,8 @@ wstring utf8ToWideString(const string& str) {
             }
             code = (code << 6) | (*s++ & 0x3F);
         }
-        if (code > 0x10FFFF) {
+        //too long encodings (a NUL in "\xE0\x80\x80") and surrogates are not valid UTF-8
+        if (code > 0x10FFFF || code < minimum[length] || (code >= 0xD800 && code < 0xE000)) {
             code = 0xFFFD;
         }
         if (code > 0xFFFF) {
@@ -441,6 +445,11 @@ void insertState(const Uint16& keyCode, const bool& isCaps) {
     }
 }
 
+static void limitTypingStates() {
+    while (_typingStates.size() > MAX_TYPING_STATES)
+        _typingStates.pop_front();
+}
+
 void saveWord() {
     //save word history
     if (hCode != vReplaceMaro) {
@@ -476,6 +485,7 @@ void saveWord() {
         }
         _typingStates.push_back(_typingStatesData);
     }
+    limitTypingStates();
 }
 
 void saveWord(const Uint32& keyCode, const int& count) {
@@ -484,6 +494,7 @@ void saveWord(const Uint32& keyCode, const int& count) {
         _typingStatesData.push_back(keyCode);
     }
     _typingStates.push_back(_typingStatesData);
+    limitTypingStates();
 }
 
 void saveSpecialChar() {
@@ -492,6 +503,7 @@ void saveSpecialChar() {
         _typingStatesData.push_back(_specialChar[i]);
     }
     _typingStates.push_back(_typingStatesData);
+    limitTypingStates();
     _specialChar.clear();
 }
 
@@ -1062,7 +1074,7 @@ void reverseLastStandaloneChar(const Uint32& keyCode, const bool& isCaps) {
 }
 
 void checkForStandaloneChar(const Uint16& data, const bool& isCaps, const Uint32& keyWillReverse) {
-    if (CHR(_index - 1) == keyWillReverse && TypingWord[_index - 1] & TONEW_MASK) {
+    if (_index > 0 && CHR(_index - 1) == keyWillReverse && TypingWord[_index - 1] & TONEW_MASK) {
         hCode = vWillProcess;
         hBPC = 1;
         hNCC = 1;
@@ -1261,6 +1273,18 @@ void handleMainKey(const Uint16& data, const bool& isCaps) {
     }
 }
 
+//the macro key follows the word on screen: remove the deleted characters, add the new ones. They are the last
+//characters of the word: hNCC of them, and the typed key too for vRestore (the app adds it after the new ones)
+static void updateMacroKey() {
+    for (i = 0; i < hBPC && hMacroKey.size() > 0; i++) {
+        hMacroKey.pop_back();
+    }
+    int count = hNCC + (hCode == vRestore ? 1 : 0);
+    for (i = (_index > count ? _index - count : 0); i < _index; i++) {
+        hMacroKey.push_back(TypingWord[i]);
+    }
+}
+
 void handleQuickTelex(const Uint16& data, const bool& isCaps) {
     hCode = vWillProcess;
     hBPC = 1;
@@ -1305,6 +1329,8 @@ void vTempOffEngine(const bool& off) {
 
 bool checkQuickConsonant() {
     if (_index <= 1) return false;
+    //the word gets one or two more characters: they must fit in TypingWord and in charData
+    if (_index >= MAX_BUFF - 2 || _longWordHelper.size() > 0) return false;
     l = 0;
     if (_index > 0) {
         if (vQuickStartConsonant && _quickStartConsonant.find(CHR(0)) != _quickStartConsonant.end()) {
@@ -1321,9 +1347,10 @@ bool checkQuickConsonant() {
             TypingWord[0] = _quickStartConsonant[CHR(0)][0] | (TypingWord[0] & CAPS_MASK ? CAPS_MASK : 0);
             l = 1;;
         }
+        map<Uint16, vector<Uint16>>::iterator endConsonant = _quickEndConsonant.find(CHR(_index-1));
         if (vQuickEndConsonant &&
             (_index-2 >= 0 && !IS_CONSONANT(CHR(_index-2))) &&
-            _quickEndConsonant.find(CHR(_index-1)) != _quickEndConsonant.end()) {
+            endConsonant != _quickEndConsonant.end()) {
             hCode = vRestore;
             if (l == 1) {
                 hNCC++;
@@ -1333,8 +1360,8 @@ bool checkQuickConsonant() {
             }
             if (_index < MAX_BUFF-1)
                 _index++;
-            TypingWord[_index-1] = _quickEndConsonant[CHR(_index-2)][1] | (TypingWord[_index-2] & CAPS_MASK ? CAPS_MASK : 0);
-            TypingWord[_index-2] = _quickEndConsonant[CHR(_index-2)][0] | (TypingWord[_index-2] & CAPS_MASK ? CAPS_MASK : 0);
+            TypingWord[_index-1] = endConsonant->second[1] | (TypingWord[_index-2] & CAPS_MASK ? CAPS_MASK : 0);
+            TypingWord[_index-2] = endConsonant->second[0] | (TypingWord[_index-2] & CAPS_MASK ? CAPS_MASK : 0);
             
             l = 1;
         }
@@ -1555,6 +1582,8 @@ void vKeyHandleEvent(const vKeyEvent& event,
         if (!IS_SPECIALKEY(data) || tempDisableKey) { //do nothing
             if (vQuickTelex && IS_QUICK_TELEX_KEY(data)) {
                 handleQuickTelex(data, _isCaps);
+                if (vUseMacro)
+                    updateMacroKey();
                 return;
             } else {
                 hCode = vDoNothing;
@@ -1588,14 +1617,7 @@ void vKeyHandleEvent(const vKeyEvent& event,
             if (hCode == vDoNothing) {
                 hMacroKey.push_back(data | (_isCaps ? CAPS_MASK : 0));
             } else if (hCode == vWillProcess || hCode == vRestore) {
-                for (i = 0; i < hBPC; i++) {
-                    if (hMacroKey.size() > 0) {
-                        hMacroKey.pop_back();
-                    }
-                }
-                for (i = _index - hBPC; i < hNCC + (_index - hBPC); i++) {
-                    hMacroKey.push_back(TypingWord[i]);
-                }
+                updateMacroKey();
             }
         }
         

@@ -59,7 +59,9 @@ static string type(const char* keys) {
     wstring out;
     startNewSession();
     for (const char* p = keys; *p; p++) {
-        vKeyHandleEvent(vKeyEvent::Keyboard, vKeyEventState::KeyDown, keyCodes.at(*p));
+        //an uppercase letter is typed with Shift
+        bool shift = *p >= 'A' && *p <= 'Z';
+        vKeyHandleEvent(vKeyEvent::Keyboard, vKeyEventState::KeyDown, keyCodes.at(shift ? *p + 32 : *p), shift ? 1 : 0);
         if (pData->code == vDoNothing) {
             out += (wchar_t)*p;
             continue;
@@ -246,6 +248,84 @@ static void testDynamicMacro() {
     vUseMacro = 0;
 }
 
+static string repeated(char c, int count) {
+    return string(count, c);
+}
+
+//bugs found in the review of October 31st, 2026
+static void testReviewFixes() {
+    setUp();
+    //quick end consonant on a word which fills the buffer: crashed (vowel + g/h/k after 29 letters, spell check off)
+    vCheckSpelling = 0;
+    vSetCheckSpelling();
+    vQuickEndConsonant = 1;
+    string word = repeated('b', 29) + "ag";
+    checkEqual("quick end consonant on a long word", type((word + " ").c_str()), word + " ");
+    vQuickEndConsonant = 0;
+    //quick start consonant: the word gets one more character than fits
+    vQuickStartConsonant = 1;
+    word = "f" + repeated('b', 31);
+    type((word + " ").c_str());
+    check("quick start consonant on a long word stays in the buffer", pData->backspaceCount <= MAX_BUFF && pData->newCharCount <= MAX_BUFF);
+    vQuickStartConsonant = 0;
+    setUp();
+
+    //macro limits of the saved data
+    initMacroMap(nullptr, 0);
+    check("macro text over 255 bytes is refused", !addMacro(repeated('a', 300), "x"));
+    check("macro content over 65535 bytes is refused", !addMacro("big", repeated('x', 70000)));
+    check("normal macro is added", addMacro("ok", "fine"));
+    vector<Byte> saved;
+    getMacroSaveData(saved);
+    initMacroMap(saved.data(), (int)saved.size() - 2); //broken data: the end is missing
+    check("broken macro data is read up to its end", !hasMacro("ok"));
+    initMacroMap(saved.data(), (int)saved.size());
+    check("macro data is read again", hasMacro("ok"));
+    vector<Byte> apps = {5, 0, 200, 'a'}; //5 apps, the first one 200 bytes long, but only 4 bytes
+    initSmartSwitchKey(apps.data(), (int)apps.size());
+    vector<string> bundleIds;
+    vector<int> statuses;
+    getAllAppInputMethodStatus(bundleIds, statuses);
+    check("broken per-app data is read up to its end", bundleIds.empty());
+
+    //macro keys follow the code table
+    vUseMacro = 1;
+    initMacroMap(nullptr, 0);
+    addMacro("đc", "được");
+    vCodeTable = 1;
+    onTableCodeChange();
+    check("macro still found after the code table changes", hasMacro("đc"));
+    vCodeTable = 0;
+    onTableCodeChange();
+    checkEqual("macro works again in Unicode", type("ddc "), "được ");
+
+    //the macro key must follow the word on screen
+    initMacroMap(nullptr, 0);
+    addMacro("ưng", "ừ");
+    checkEqual("macro typed with a standalone w", type("wng "), "ừ ");
+    addMacro("ba", "BA");
+    checkEqual("restored word is not a shorter macro", type("baaa "), "baa ");
+    vQuickTelex = 1;
+    addMacro("cha", "CHA");
+    checkEqual("macro typed with quick telex", type("cca "), "CHA ");
+    vQuickTelex = 0;
+
+    //auto caps does not change dynamic values
+    vAutoCapsMacro = 1;
+    macroClipboardText = [] { return string("https://example.com/AbC"); };
+    addMacro("cb", "link {clipboard}");
+    checkEqual("auto caps keeps the clipboard text", type("Cb "), "Link https://example.com/AbC ");
+    checkEqual("all caps keeps the clipboard text", type("CB "), "LINK https://example.com/AbC ");
+    vAutoCapsMacro = 0;
+    macroClipboardText = nullptr;
+    vUseMacro = 0;
+
+    //invalid UTF-8: too long encodings and surrogates
+    check("too long UTF-8 encoding is refused", utf8ToWideString("ab\xE0\x80\x80" "cd") == L"ab\xFFFD" L"cd");
+    check("UTF-8 surrogate is refused", utf8ToWideString("\xED\xA0\x80") == L"\xFFFD");
+    setUp();
+}
+
 static void testAppMemory() {
     initSmartSwitchKey(nullptr, 0);
     //status: bit 0 Vietnamese, other bits code table
@@ -291,6 +371,7 @@ int main() {
     testUtf8();
     testMacro();
     testDynamicMacro();
+    testReviewFixes();
     printf("engine: %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

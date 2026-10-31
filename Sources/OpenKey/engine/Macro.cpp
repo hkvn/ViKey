@@ -31,6 +31,13 @@ string (*macroClipboardText)() = nullptr;
 static const char* _dynamicValueNames[] = {"{date}", "{time}", "{weekday}", "{day}", "{month}", "{year}", "{clipboard}"};
 static const char* _weekdays[] = {"Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"};
 
+#define MAX_MACRO_TEXT_SIZE 255 //the saved data keeps the text size in one byte
+#define MAX_MACRO_CONTENT_SIZE 65535 //and the content size in two bytes
+#define MAX_MACRO_COUNT 65535 //and the number of macros in two bytes
+
+//positions of the content of the last macro found which come from a dynamic value: auto caps does not change them
+static vector<bool> _valuePositions;
+
 static bool hasDynamicValue(const string& content) {
     for (const char* name : _dynamicValueNames) {
         if (content.find(name) != string::npos)
@@ -63,26 +70,41 @@ static string dynamicValue(const string& name, const struct tm& now, bool& known
     return buff;
 }
 
-string fillMacroDynamicValues(const string& content) {
-    if (!hasDynamicValue(content))
-        return content;
+//the content cut into fixed text and filled dynamic values (isValue)
+static void splitDynamicValues(const string& content, vector<pair<string, bool>>& parts) {
+    parts.clear();
     time_t time = std::time(nullptr);
     struct tm now;
     localtime_r(&time, &now);
-    string result;
+    string text;
     size_t i = 0, end;
     bool known;
     while (i < content.size()) {
         if (content[i] == '{' && (end = content.find('}', i)) != string::npos) {
             string value = dynamicValue(content.substr(i, end - i + 1), now, known);
             if (known) {
-                result += value;
+                if (!text.empty())
+                    parts.push_back(make_pair(text, false));
+                text.clear();
+                parts.push_back(make_pair(value, true));
                 i = end + 1;
                 continue;
             }
         }
-        result += content[i++];
+        text += content[i++];
     }
+    if (!text.empty())
+        parts.push_back(make_pair(text, false));
+}
+
+string fillMacroDynamicValues(const string& content) {
+    if (!hasDynamicValue(content))
+        return content;
+    vector<pair<string, bool>> parts;
+    splitDynamicValues(content, parts);
+    string result;
+    for (const pair<string, bool>& part : parts)
+        result += part.first;
     return result;
 }
 
@@ -139,21 +161,27 @@ static void convert(const string& str, vector<Uint32>& outData) {
  */
 void initMacroMap(const Byte* pData, const int& size) {
     macroMap.clear();
+    if (pData == NULL || size < 2)
+        return;
     Uint16 macroCount = 0;
-    Uint32 cursor = 0;
-    if (size >= 2) {
-        memcpy(&macroCount, pData + cursor, 2);
-        cursor+=2;
-    }
+    memcpy(&macroCount, pData, 2);
+    size_t cursor = 2, total = (size_t)size;
     Uint8 macroTextSize;
     Uint16 macroContentSize;
     for (int i = 0; i < macroCount; i++) {
+        //the saved data can be broken: never read after its end
+        if (cursor + 1 > total)
+            break;
         macroTextSize = pData[cursor++];
+        if (cursor + macroTextSize + 2 > total)
+            break;
         string macroText((char*)pData + cursor, macroTextSize);
         cursor += macroTextSize;
         
         memcpy(&macroContentSize, pData + cursor, 2);
         cursor+=2;
+        if (cursor + macroContentSize > total)
+            break;
         string macroContent((char*)pData + cursor, macroContentSize);
         cursor += macroContentSize;
         
@@ -171,11 +199,13 @@ void initMacroMap(const Byte* pData, const int& size) {
 }
 
 void getMacroSaveData(vector<Byte>& outData) {
-    Uint16 totalMacro = (Uint16)macroMap.size();
+    //addMacro keeps the sizes in the limits of this format
+    Uint16 totalMacro = (Uint16)min(macroMap.size(), (size_t)MAX_MACRO_COUNT);
     outData.push_back((Byte)totalMacro);
     outData.push_back((Byte)(totalMacro>>8));
     
-    for (std::map<vector<Uint32>, MacroData>::iterator it = macroMap.begin(); it != macroMap.end(); ++it) {
+    int saved = 0;
+    for (std::map<vector<Uint32>, MacroData>::iterator it = macroMap.begin(); it != macroMap.end() && saved < totalMacro; ++it, ++saved) {
         outData.push_back((Byte)it->second.macroText.size());
         for (int j = 0; j < it->second.macroText.size(); j++) {
             outData.push_back(it->second.macroText[j]);
@@ -193,7 +223,10 @@ void getMacroSaveData(vector<Byte>& outData) {
 static bool modifyCaseUnicode(Uint32& code, const bool& isUpperCase=true) {
     _charBuff = code;
     if (!(code & CHAR_CODE_MASK)) { //for normal char
-        code &= isUpperCase ? CAPS_MASK :  ~CAPS_MASK;
+        if (isUpperCase)
+            code |= CAPS_MASK;
+        else
+            code &= ~CAPS_MASK;
         return code != _charBuff;
     }
     
@@ -215,10 +248,20 @@ static bool modifyCaseUnicode(Uint32& code, const bool& isUpperCase=true) {
 
 //content to type: dynamic values are filled now
 static void getContentCode(const MacroData& data, vector<Uint32>& macroContentCode) {
-    if (data.hasDynamicValue)
-        convert(fillMacroDynamicValues(data.macroContent), macroContentCode);
-    else
+    _valuePositions.clear();
+    if (!data.hasDynamicValue) {
         macroContentCode = data.macroContentCode;
+        return;
+    }
+    macroContentCode.clear();
+    vector<pair<string, bool>> parts;
+    splitDynamicValues(data.macroContent, parts);
+    vector<Uint32> code;
+    for (const pair<string, bool>& part : parts) {
+        convert(part.first, code);
+        macroContentCode.insert(macroContentCode.end(), code.begin(), code.end());
+        _valuePositions.insert(_valuePositions.end(), code.size(), part.second);
+    }
 }
 
 bool findMacro(vector<Uint32>& key, vector<Uint32>& macroContentCode) {
@@ -242,6 +285,9 @@ bool findMacro(vector<Uint32>& key, vector<Uint32>& macroContentCode) {
             if (macroMap.find(key) != macroMap.end()) {
                 getContentCode(macroMap[key], macroContentCode);
                 for (c = 0; c < macroContentCode.size(); c++) {
+                    //a dynamic value (clipboard, date,...) is typed as it is
+                    if (c < _valuePositions.size() && _valuePositions[c])
+                        continue;
                     if (c == 0 || _macroFlag) {
                         _kChar = keyCodeToCharacter(macroContentCode[c]);
                         if (_kChar != 0) {
@@ -279,9 +325,14 @@ void getAllMacro(vector<vector<Uint32>>& keys, vector<string>& macroTexts, vecto
 }
 
 bool addMacro(const string& macroText, const string& macroContent) {
+    //the limits of the saved data
+    if (macroText.empty() || macroText.size() > MAX_MACRO_TEXT_SIZE || macroContent.size() > MAX_MACRO_CONTENT_SIZE)
+        return false;
     vector<Uint32> key;
     convert(macroText, key);
     if (macroMap.find(key) == macroMap.end()) { //add new macro
+        if (macroMap.size() >= MAX_MACRO_COUNT)
+            return false;
         MacroData data;
         data.macroText = macroText;
         data.macroContent = macroContent;
@@ -307,7 +358,22 @@ bool deleteMacro(const string& macroText) {
 }
 
 void onTableCodeChange() {
+    //the keys depend on the code table too, see findMacro
+    map<vector<Uint32>, MacroData> rebuilt;
     for (std::map<vector<Uint32>, MacroData>::iterator it = macroMap.begin(); it != macroMap.end(); ++it) {
-        convert(it->second.macroContent, it->second.macroContentCode);
+        MacroData data = it->second;
+        vector<Uint32> key;
+        convert(data.macroText, key);
+        convert(data.macroContent, data.macroContentCode);
+        rebuilt[key] = data;
     }
+    macroMap.swap(rebuilt);
+}
+
+bool macrosUseClipboard() {
+    for (std::map<vector<Uint32>, MacroData>::iterator it = macroMap.begin(); it != macroMap.end(); ++it) {
+        if (it->second.hasDynamicValue && it->second.macroContent.find("{clipboard}") != string::npos)
+            return true;
+    }
+    return false;
 }

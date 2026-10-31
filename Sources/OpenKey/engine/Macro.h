@@ -54,7 +54,8 @@ bool hasMacro(const string& macroName);
 void getAllMacro(vector<vector<Uint32>>& keys, vector<string>& macroTexts, vector<string>& macroContents);
 
 /**
- * add new macro to memory
+ * add new macro to memory, or change the content of an existing one.
+ * false if the text is empty or longer than 255 bytes, the content longer than 65535 bytes, or there are 65535 macros
  */
 bool addMacro(const string& macroText, const string& macroContent);
 
@@ -64,9 +65,14 @@ bool addMacro(const string& macroText, const string& macroContent);
 bool deleteMacro(const string& macroText);
 
 /**
- * When table code changed, we have to call this function to reload all macroContentCode
+ * When table code changed, we have to call this function to reload all macroContentCode (and the keys)
  */
 void onTableCodeChange();
+
+/**
+ * a macro has {clipboard}: the app keeps the clipboard text for it
+ */
+bool macrosUseClipboard();
 
 /**
  * Fill the dynamic values of a macro content:
