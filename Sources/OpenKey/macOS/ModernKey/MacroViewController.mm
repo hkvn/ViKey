@@ -95,7 +95,7 @@
         [alert addButtonWithTitle:@"Có"];
         [alert addButtonWithTitle:@"Không"];
         [alert setMessageText:@"Dữ liệu gõ tắt"];
-        [alert setAlertStyle:NSCriticalAlertStyle];
+        [alert setAlertStyle:NSAlertStyleCritical];
         [alert beginSheetModalForWindow:self.view.window completionHandler:^(NSModalResponse returnCode) {
             readFromFile(openPanel.URL.path.UTF8String, returnCode == 1000);
             [self saveAndReload];
@@ -121,7 +121,7 @@
     [alert setInformativeText:msg];
     [alert addButtonWithTitle:@"OK"];
     [alert setMessageText:@"Gõ tắt"];
-    [alert setAlertStyle:NSCriticalAlertStyle];
+    [alert setAlertStyle:NSAlertStyleCritical];
     [alert beginSheetModalForWindow:self.view.window completionHandler:^(NSModalResponse returnCode) {
         
     }];

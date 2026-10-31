@@ -123,13 +123,76 @@ static bool _willTempOffEngine = false;
 void findAndCalculateVowel(const bool& forGrammar=false);
 void insertMark(const Uint32& markMask, const bool& canModifyFlag=true);
 
-static std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+//UTF-8 <-> wstring. Characters outside the BMP are kept as UTF-16 surrogate pairs, because the
+//app sends UTF-16 to the system. Like C strings, the conversion stops at the first NUL.
+//Invalid input becomes U+FFFD (std::wstring_convert, deprecated in C++17, threw an exception).
 wstring utf8ToWideString(const string& str) {
-    return converter.from_bytes(str.c_str());
+    wstring result;
+    const unsigned char* s = (const unsigned char*)str.c_str();
+    while (*s != 0) {
+        Uint32 code = *s++;
+        int extra = 0;
+        if (code >= 0xF0 && code < 0xF5) {
+            code &= 0x07;
+            extra = 3;
+        } else if (code >= 0xE0 && code < 0xF0) {
+            code &= 0x0F;
+            extra = 2;
+        } else if (code >= 0xC2 && code < 0xE0) {
+            code &= 0x1F;
+            extra = 1;
+        } else if (code >= 0x80) {
+            code = 0xFFFD; //not a valid first byte
+        }
+        for (; extra > 0; extra--) {
+            if ((*s & 0xC0) != 0x80) { //missing byte, also stops at NUL
+                code = 0xFFFD;
+                break;
+            }
+            code = (code << 6) | (*s++ & 0x3F);
+        }
+        if (code > 0x10FFFF) {
+            code = 0xFFFD;
+        }
+        if (code > 0xFFFF) {
+            code -= 0x10000;
+            result += (wchar_t)(0xD800 + (code >> 10));
+            result += (wchar_t)(0xDC00 + (code & 0x3FF));
+        } else {
+            result += (wchar_t)code;
+        }
+    }
+    return result;
 }
 
 string wideStringToUtf8(const wstring& str) {
-    return converter.to_bytes(str.c_str());
+    string result;
+    for (size_t i = 0; i < str.size() && str[i] != 0; i++) {
+        Uint32 code = (Uint32)str[i];
+        if (code >= 0xD800 && code < 0xDC00 && i + 1 < str.size() &&
+            (Uint32)str[i + 1] >= 0xDC00 && (Uint32)str[i + 1] < 0xE000) { //surrogate pair
+            code = 0x10000 + ((code - 0xD800) << 10) + ((Uint32)str[i + 1] - 0xDC00);
+            i++;
+        } else if ((code >= 0xD800 && code < 0xE000) || code > 0x10FFFF) {
+            code = 0xFFFD;
+        }
+        if (code < 0x80) {
+            result += (char)code;
+        } else if (code < 0x800) {
+            result += (char)(0xC0 | (code >> 6));
+            result += (char)(0x80 | (code & 0x3F));
+        } else if (code < 0x10000) {
+            result += (char)(0xE0 | (code >> 12));
+            result += (char)(0x80 | ((code >> 6) & 0x3F));
+            result += (char)(0x80 | (code & 0x3F));
+        } else {
+            result += (char)(0xF0 | (code >> 18));
+            result += (char)(0x80 | ((code >> 12) & 0x3F));
+            result += (char)(0x80 | ((code >> 6) & 0x3F));
+            result += (char)(0x80 | (code & 0x3F));
+        }
+    }
+    return result;
 }
 
 void* vKeyInit() {

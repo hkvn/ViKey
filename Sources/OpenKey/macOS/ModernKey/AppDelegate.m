@@ -14,13 +14,11 @@
 #include <libproc.h>
 #include <sys/proc_info.h>
 #import "AppDelegate.h"
-#import "ViewController.h"
 #import "OpenKeyManager.h"
 #import "MJAccessibilityUtils.h"
 #import "ViKey-Swift.h"
 
 AppDelegate* appDelegate;
-extern ViewController* viewController;
 extern void OnTableCodeChange(void);
 extern void OnInputMethodChanged(void);
 extern void RequestNewSession(void);
@@ -382,7 +380,6 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     [[NSUserDefaults standardUserDefaults] setInteger:1 forKey:@"RunOnStartup"];
 
     [self fillData];
-    [viewController fillData];
 }
 
 -(void)setRunOnStartup:(BOOL)val {
@@ -522,7 +519,6 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     [[NSUserDefaults standardUserDefaults] setInteger:intInputMethod forKey:@"InputMethod"];
 
     [self fillData];
-    [viewController fillData];
     
     if (willNotify)
         OnInputMethodChanged();
@@ -542,14 +538,12 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     [[NSUserDefaults standardUserDefaults] setInteger:index forKey:@"InputType"];
     vInputType = index;
     [self fillData];
-    [viewController fillData];
 }
 
 - (void)onCodeTableChanged:(int)index {
     [[NSUserDefaults standardUserDefaults] setInteger:index forKey:@"CodeTable"];
     vCodeTable = index;
     [self fillData];
-    [viewController fillData];
     OnTableCodeChange();
 }
 
@@ -736,7 +730,6 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 #pragma mark -Short key event
 -(void)onSwitchLanguage {
     [self onInputMethodSelected];
-    [viewController fillData];
 }
 
 #pragma mark Reset OpenKey after mac computer awake

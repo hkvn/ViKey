@@ -7,7 +7,6 @@
 //
 
 #import <Cocoa/Cocoa.h>
-#import "ViewController.h"
 
 #define OPENKEY_BUNDLE @"com.hkvn.vikey"
 
