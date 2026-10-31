@@ -114,7 +114,7 @@ final class DiagnosticsModel: ObservableObject {
         let state = DiagnosticsSection(title: "Trạng thái", rows: [
             DiagnosticsRow(label: "Quyền Trợ năng (Accessibility)", value: trusted ? "Đã cấp" : "Chưa cấp", warning: !trusted),
             DiagnosticsRow(label: "Bắt phím", value: tap, warning: !status.tapRunning || !status.tapEnabled),
-            DiagnosticsRow(label: "Secure Input", value: secureInput.map { "Bật bởi \($0)" } ?? "Tắt", warning: secureInput != nil),
+            DiagnosticsRow(label: "Secure Input", value: secureInput.map { "Bật, \($0)" } ?? "Tắt", warning: secureInput != nil),
             DiagnosticsRow(label: "Chế độ gõ", value: vLanguage != 0 ? "Tiếng Việt" : "English"),
             DiagnosticsRow(label: "Kiểu gõ", value: inputType),
             DiagnosticsRow(label: "Bảng mã", value: codeTable),
