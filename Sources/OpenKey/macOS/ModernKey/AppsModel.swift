@@ -15,36 +15,98 @@ struct AppEntry: Identifiable {
     let bundleId: String
     let name: String
     let icon: NSImage?
+    /// false when the app is not on this Mac any more, or was saved by name because it has no bundle id
+    let isInstalled: Bool
     var id: String { bundleId }
 
+    /// slow (about 1 ms per app): AppsModel calls it in the background
     init(bundleId: String) {
         self.bundleId = bundleId
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
             let displayName = FileManager.default.displayName(atPath: url.path)
             name = displayName.hasSuffix(".app") ? String(displayName.dropLast(4)) : displayName
             icon = NSWorkspace.shared.icon(forFile: url.path)
+            isInstalled = true
         } else {
-            //not installed any more, or saved by name when the app has no bundle id
             name = bundleId
             icon = nil
+            isInstalled = false
         }
+    }
+
+    /// shown until the name and icon are found
+    init(placeholder bundleId: String) {
+        self.bundleId = bundleId
+        name = bundleId
+        icon = nil
+        isInstalled = true
+    }
+}
+
+/// apps already looked up, used on the main thread and on the lookup queue
+private enum AppEntryCache {
+    private static let lock = NSLock()
+    private static var entries: [String: AppEntry] = [:]
+
+    static subscript(bundleId: String) -> AppEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries[bundleId]
+    }
+
+    static func add(_ entry: AppEntry) {
+        lock.lock()
+        entries[entry.bundleId] = entry
+        lock.unlock()
     }
 }
 
 final class AppsModel: ObservableObject {
     @Published private(set) var excludedApps: [AppEntry] = []
     @Published private(set) var rememberedApps: [AppEntry] = []
+    /// names and icons of new apps are being looked up
+    @Published private(set) var isLoading = false
     /// bundle id -> status (bit 0: Vietnamese, other bits: code table)
     @Published private var statuses: [String: Int] = [:]
+
+    private static let lookupQueue = DispatchQueue(label: "com.hkvn.vikey.apps", qos: .userInitiated)
+    private var generation = 0
 
     init() {
         reload()
     }
 
+    /// the lists are shown at once; names and icons not looked up yet follow from the background
     func reload() {
-        excludedApps = Self.sorted(VKExcludedApps.bundleIds.map(AppEntry.init))
         statuses = VKAppMemory.allApps().mapValues { $0.intValue }
-        rememberedApps = Self.sorted(statuses.keys.map(AppEntry.init))
+        showEntries()
+        let missing = Set(VKExcludedApps.bundleIds).union(statuses.keys).filter { AppEntryCache[$0] == nil }
+        guard !missing.isEmpty else {
+            isLoading = false
+            return
+        }
+        isLoading = true
+        generation += 1
+        let current = generation
+        Self.lookupQueue.async { [weak self] in
+            //an earlier reload may have looked them up already
+            for bundleId in missing where AppEntryCache[bundleId] == nil {
+                AppEntryCache.add(AppEntry(bundleId: bundleId))
+            }
+            DispatchQueue.main.async {
+                guard let self, current == self.generation else { return }
+                self.isLoading = false
+                self.showEntries()
+            }
+        }
+    }
+
+    private func showEntries() {
+        func entry(_ bundleId: String) -> AppEntry {
+            AppEntryCache[bundleId] ?? AppEntry(placeholder: bundleId)
+        }
+        excludedApps = Self.sorted(VKExcludedApps.bundleIds.map(entry))
+        rememberedApps = Self.sorted(statuses.keys.map(entry))
     }
 
     private static func sorted(_ apps: [AppEntry]) -> [AppEntry] {
@@ -92,6 +154,18 @@ final class AppsModel: ObservableObject {
 
     func forget(_ bundleId: String) {
         VKAppMemory.removeApp(bundleId)
+        reload()
+    }
+
+    /// remembered apps which are not on this Mac any more
+    var uninstalledApps: [AppEntry] {
+        isLoading ? [] : rememberedApps.filter { !$0.isInstalled }
+    }
+
+    func forgetUninstalledApps() {
+        for app in uninstalledApps {
+            VKAppMemory.removeApp(app.bundleId)
+        }
         reload()
     }
 

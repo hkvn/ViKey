@@ -160,7 +160,27 @@ struct MacroSettingsView: View {
 struct AppsSettingsView: View {
     @ObservedObject var apps: AppsModel
     @State private var confirmForgetAll = false
+    @State private var search = ""
     private let codeTables = OpenKeyManager.getTableCodes() as? [String] ?? []
+
+    private var shownApps: [AppEntry] {
+        guard !search.isEmpty else { return apps.rememberedApps }
+        return apps.rememberedApps.filter { $0.name.localizedCaseInsensitiveContains(search) || $0.bundleId.localizedCaseInsensitiveContains(search) }
+    }
+
+    private func appRow(_ app: AppEntry) -> some View {
+        HStack {
+            AppLabel(app: app)
+            Spacer()
+            RowPicker(help: "Chế độ gõ", titles: [(1, "Tiếng Việt"), (0, "English")],
+                      selection: apps.languageBinding(for: app.bundleId))
+            if vRememberCode != 0 {
+                RowPicker(help: "Bảng mã", titles: codeTables.enumerated().map { ($0.offset, $0.element) },
+                          selection: apps.codeTableBinding(for: app.bundleId))
+            }
+            RemoveButton(help: "Quên ứng dụng này") { apps.forget(app.bundleId) }
+        }
+    }
 
     var body: some View {
         Form {
@@ -187,31 +207,52 @@ struct AppsSettingsView: View {
             Section {
                 if apps.rememberedApps.isEmpty {
                     Text("Chưa có ứng dụng nào.").foregroundColor(.secondary)
-                }
-                ForEach(apps.rememberedApps) { app in
-                    HStack {
-                        AppLabel(app: app)
-                        Spacer()
-                        Picker("Chế độ gõ", selection: apps.languageBinding(for: app.bundleId)) {
-                            Text("Tiếng Việt").tag(1)
-                            Text("English").tag(0)
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                        if vRememberCode != 0 {
-                            Picker("Bảng mã", selection: apps.codeTableBinding(for: app.bundleId)) {
-                                ForEach(codeTables.indices, id: \.self) { index in
-                                    Text(codeTables[index]).tag(index)
-                                }
-                            }
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                        //labels hidden: in a form the title would be a label, and the field an empty box on the right
+                        TextField("Tìm ứng dụng", text: $search, prompt: Text("Tìm ứng dụng"))
+                            .textFieldStyle(.plain)
                             .labelsHidden()
-                            .fixedSize()
-                        }
-                        RemoveButton(help: "Quên ứng dụng này") { apps.forget(app.bundleId) }
                     }
-                }
-                if !apps.rememberedApps.isEmpty {
-                    Button("Quên tất cả…") { confirmForgetAll = true }
+                    //lazy: only the rows on screen are made, so hundreds of apps open fast.
+                    //A ScrollView, not a List: a List inside the form does not scroll with the mouse wheel
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(shownApps.enumerated()), id: \.element.id) { index, app in
+                                appRow(app)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(index % 2 == 1 ? Color.primary.opacity(0.04) : Color.clear)
+                            }
+                        }
+                    }
+                    //a new list for each search: it starts at the top, not at the place scrolled to before
+                    .id(search)
+                    .frame(height: 250)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+                    .opacity(apps.isLoading ? 0.4 : 1)
+                    .overlay {
+                        if apps.isLoading {
+                            ProgressView().controlSize(.small)
+                        } else if shownApps.isEmpty {
+                            Text("Không tìm thấy ứng dụng nào.").foregroundColor(.secondary)
+                        }
+                    }
+                    HStack {
+                        let uninstalled = apps.uninstalledApps
+                        if !uninstalled.isEmpty {
+                            Button("Quên \(uninstalled.count) ứng dụng đã gỡ") { apps.forgetUninstalledApps() }
+                                .help("Các ứng dụng không còn trên máy Mac này")
+                        }
+                        Spacer()
+                        Text("\(apps.rememberedApps.count) ứng dụng")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Button("Quên tất cả…") { confirmForgetAll = true }
+                    }
                 }
             } header: {
                 Text("Ứng dụng đã ghi nhớ")
@@ -222,8 +263,8 @@ struct AppsSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        //the lists can be long: fixed height, the form scrolls
-        .frame(width: settingsTabWidth, height: 520)
+        //the remembered apps scroll in their own list
+        .frame(width: settingsTabWidth, height: 620)
         .alert("Quên tất cả ứng dụng?", isPresented: $confirmForgetAll) {
             Button("Quên tất cả", role: .destructive) { apps.forgetAll() }
             Button("Huỷ", role: .cancel) {}
@@ -247,6 +288,30 @@ private struct AppLabel: View {
             Text(app.name).lineLimit(1)
         }
         .help(app.bundleId)
+    }
+}
+
+/// pop-up as wide as its title, for the rows of a list; a Picker would fill the row
+private struct RowPicker: View {
+    let help: String
+    let titles: [(tag: Int, title: String)]
+    @Binding var selection: Int
+
+    var body: some View {
+        Menu {
+            Picker(help, selection: $selection) {
+                ForEach(titles, id: \.tag) { item in
+                    Text(item.title).tag(item.tag)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text(titles.first { $0.tag == selection }?.title ?? "")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(help)
     }
 }
 

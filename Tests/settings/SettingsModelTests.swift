@@ -77,6 +77,21 @@ struct SettingsModelTests {
         VKAppMemory.setStatus(1, forApp: "com.apple.TextEdit")
         let apps = AppsModel()
         check("remembered app is listed", apps.rememberedApps.map(\.bundleId) == ["com.apple.TextEdit"])
+        func waitForLookup() {
+            let timeout = Date().addingTimeInterval(5)
+            while apps.isLoading && Date() < timeout {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+        }
+        waitForLookup()
+        check("app name is looked up in the background", !apps.isLoading && apps.rememberedApps.first?.name != "com.apple.TextEdit"
+              && apps.rememberedApps.first?.isInstalled == true)
+        VKAppMemory.setStatus(1, forApp: "com.example.removed")
+        apps.reload()
+        waitForLookup()
+        check("app which is not installed", apps.uninstalledApps.map(\.bundleId) == ["com.example.removed"])
+        apps.forgetUninstalledApps()
+        check("forget apps which are not installed", apps.rememberedApps.map(\.bundleId) == ["com.apple.TextEdit"])
         check("app mode is Vietnamese", apps.languageBinding(for: "com.apple.TextEdit").wrappedValue == 1)
         apps.codeTableBinding(for: "com.apple.TextEdit").wrappedValue = 2
         check("code table keeps the mode", VKAppMemory.allApps()["com.apple.TextEdit"]?.intValue == 1 | 2 << 1)
