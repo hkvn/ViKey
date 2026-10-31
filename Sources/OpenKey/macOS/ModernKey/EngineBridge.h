@@ -12,9 +12,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// one macro: the text to type and the full content
 @interface VKMacro : NSObject
+-(instancetype)initWithText:(NSString*)text content:(NSString*)content;
 @property (nonatomic, copy, readonly) NSString* text;
 @property (nonatomic, copy, readonly) NSString* content;
 @end
+
+/// posted on the main thread when the macros change
+extern NSNotificationName const VKMacroStoreDidChangeNotification;
 
 @interface VKMacroStore : NSObject
 +(NSArray<VKMacro*>*)allMacros;
@@ -22,8 +26,8 @@ NS_ASSUME_NONNULL_BEGIN
 /// adds the macro, or changes the content of an existing one
 +(void)setMacro:(NSString*)text content:(NSString*)content;
 +(void)deleteMacro:(NSString*)text;
-+(void)importFromFile:(NSString*)path keepCurrent:(BOOL)keepCurrent;
-+(void)exportToFile:(NSString*)path;
+/// keepCurrent: existing macros are not changed; otherwise the old macros are removed first
++(void)addMacros:(NSArray<VKMacro*>*)macros keepCurrent:(BOOL)keepCurrent NS_SWIFT_NAME(addMacros(_:keepCurrent:));
 @end
 
 typedef NS_ENUM(NSInteger, VKConvertOption) {
@@ -58,6 +62,31 @@ typedef NS_ENUM(NSInteger, VKConvertOption) {
 /// apps where ViKey always types English
 @interface VKExcludedApps : NSObject
 @property (class, nonatomic, copy) NSArray<NSString*>* bundleIds;
+@end
+
+/// what the keyboard thread sees now, for the diagnostics window
+@interface VKEngineStatus : NSObject
++(VKEngineStatus*)current;
+/// the event tap exists
+@property (nonatomic, readonly) BOOL tapRunning;
+@property (nonatomic, readonly) BOOL tapEnabled;
+/// times macOS turned the tap off
+@property (nonatomic, readonly) NSInteger tapRestartCount;
+/// keys and clicks handled since the tap started
+@property (nonatomic, readonly) NSInteger eventCount;
+@property (nonatomic, readonly) double averageEventMicroseconds;
+@property (nonatomic, readonly) double maxEventMicroseconds;
+/// last check of the typing app
+@property (nonatomic, readonly) double detectMicroseconds;
+/// how the typing app was found: 0 the frontmost app, 1 a focused panel over it (Accessibility), 2 the Spotlight window
+@property (nonatomic, readonly) NSInteger detectMethod;
+@property (nonatomic, readonly) BOOL accessibilityAnswered;
+@property (nonatomic, readonly, copy) NSString* frontApp;
+/// the app which receives the keys
+@property (nonatomic, readonly, copy) NSString* typingApp;
+@property (nonatomic, readonly) BOOL typingAppExcluded;
+@property (nonatomic, readonly, copy) NSString* inputSource;
+@property (nonatomic, readonly) BOOL englishInputSource;
 @end
 
 NS_ASSUME_NONNULL_END

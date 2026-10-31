@@ -16,16 +16,18 @@
 #import "AppDelegate.h"
 #import "OpenKeyManager.h"
 #import "MJAccessibilityUtils.h"
+#import "Logging.h"
 #import "ViKey-Swift.h"
 
 AppDelegate* appDelegate;
 extern void OnTableCodeChange(void);
 extern void OnInputMethodChanged(void);
 extern void RequestNewSession(void);
-extern void OnActiveAppChanged(void);
-extern void InvalidateTargetApp(void);
-extern void UpdateExcludedApp(void);
+extern void OnFrontAppChanged(void);
 extern bool IsExcludedAppActive(void);
+//the engine lock, see Engine.h: hold it while changing the engine options which the keyboard thread also changes
+extern void EngineLock(void);
+extern void EngineUnlock(void);
 
 //see document in Engine.h
 int vLanguage = 1;
@@ -87,6 +89,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     SettingsWindowController *_settingsWC;
     MacroWindowController *_macroWC;
     ConvertToolWindowController *_convertWC;
+    DiagnosticsWindowController *_diagnosticsWC;
     WelcomeWindowController *_welcomeWC;
     BOOL _started;
     
@@ -180,6 +183,9 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     appDelegate = self;
+    NSDictionary* info = [[NSBundle mainBundle] infoDictionary];
+    VKLog(@"app", @"ViKey %@ (build %@) on macOS %@", info[@"CFBundleShortVersionString"], info[@"CFBundleVersion"],
+          [[NSProcessInfo processInfo] operatingSystemVersionString]);
     [self importOpenKeySettings];
     
     [self registerSupportedNotification];
@@ -207,12 +213,14 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     }
 
     if (alreadyRunning) {
+        VKLog(@"app", @"another ViKey is running: quit");
         [NSApp terminate:nil];
         return;
     }
     
     // check if user granted Accessabilty permission
     if (!MJAccessibilityIsEnabled()) {
+        VKLog(@"app", @"no Accessibility permission: show the welcome window");
         [self showWelcome];
         return;
     }
@@ -240,6 +248,8 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         if (![OpenKeyManager initEventTap]) {
             [self askToRelaunch];
         } else {
+            //the engine has loaded the macros: the synced file can change them now
+            [[MacroSync shared] start];
             NSInteger showui = [[NSUserDefaults standardUserDefaults] integerForKey:@"ShowUIOnStartup"];
             if (showui == 1) {
                 [self onControlPanelSelected];
@@ -273,7 +283,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 - (void)applicationWillTerminate:(NSNotification *)aNotification {
-    // Insert code here to tear down your application
+    [[MacroSync shared] flushPendingWrite];
 }
 
 -(void) createStatusBarMenu {
@@ -320,6 +330,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     
     [theMenu addItemWithTitle:@"Cài đặt…" action:@selector(onControlPanelSelected) keyEquivalent:@","];
     [theMenu addItemWithTitle:@"Gõ tắt..." action:@selector(onMacroSelected) keyEquivalent:@""];
+    [theMenu addItemWithTitle:@"Chẩn đoán…" action:@selector(onDiagnosticsSelected) keyEquivalent:@""];
     [theMenu addItemWithTitle:@"Giới thiệu" action:@selector(onAboutSelected) keyEquivalent:@""];
     [theMenu addItem:[NSMenuItem separatorItem]];
     
@@ -374,6 +385,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 -(void)loadDefaultConfig {
+    EngineLock();
     vLanguage = 1; [[NSUserDefaults standardUserDefaults] setInteger:vLanguage forKey:@"InputMethod"];
     vInputType = 0; [[NSUserDefaults standardUserDefaults] setInteger:vInputType forKey:@"InputType"];
     vFreeMark = 0; [[NSUserDefaults standardUserDefaults] setInteger:vFreeMark forKey:@"FreeMark"];
@@ -402,6 +414,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
     [[NSUserDefaults standardUserDefaults] setInteger:1 forKey:@"GrayIcon"];
     [[NSUserDefaults standardUserDefaults] setInteger:1 forKey:@"RunOnStartup"];
+    EngineUnlock();
 
     [self fillData];
 }
@@ -458,6 +471,8 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 - (void) fillData {
+    //the keyboard thread also changes the mode: it saves it first (see SaveModeAndRefreshMenu), then this reads it
+    EngineLock();
     //fill data
     NSInteger intInputMethod = [[NSUserDefaults standardUserDefaults] integerForKey:@"InputMethod"];
     [menuInputMethod setState:(intInputMethod == 1 ? NSControlStateValueOn : NSControlStateValueOff)];
@@ -503,6 +518,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         [mnuVietnameseLocaleCP1258 setState:NSControlStateValueOn];
     }
     vCodeTable = (int)intCode;
+    EngineUnlock();
     
     //
     NSInteger intRunOnStartup = [[NSUserDefaults standardUserDefaults] integerForKey:@"RunOnStartup"];
@@ -535,6 +551,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 -(void)onImputMethodChanged:(BOOL)willNotify {
+    EngineLock();
     NSInteger intInputMethod = [[NSUserDefaults standardUserDefaults] integerForKey:@"InputMethod"];
     if (intInputMethod == 0)
         intInputMethod = 1;
@@ -542,11 +559,13 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         intInputMethod = 0;
     vLanguage = (int)intInputMethod;
     [[NSUserDefaults standardUserDefaults] setInteger:intInputMethod forKey:@"InputMethod"];
+    EngineUnlock();
 
     [self fillData];
     
     if (willNotify)
         OnInputMethodChanged();
+    VKLog(@"mode", @"%@ from the menu", intInputMethod ? @"Vietnamese" : @"English");
 }
 
 #pragma mark -StatusBar menu action
@@ -560,16 +579,21 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 - (void)onInputTypeSelectedIndex:(int)index {
+    EngineLock();
     [[NSUserDefaults standardUserDefaults] setInteger:index forKey:@"InputType"];
     vInputType = index;
+    EngineUnlock();
     [self fillData];
 }
 
 - (void)onCodeTableChanged:(int)index {
+    //the macros must use the new code table before the next key
+    EngineLock();
     [[NSUserDefaults standardUserDefaults] setInteger:index forKey:@"CodeTable"];
     vCodeTable = index;
-    [self fillData];
     OnTableCodeChange();
+    EngineUnlock();
+    [self fillData];
 }
 
 - (void)onCodeSelected:(id)sender {
@@ -616,6 +640,13 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     [[self settingsWindowController] showWithTab:SettingsWindowController.aboutTab];
 }
 
+-(void) onDiagnosticsSelected {
+    if (_diagnosticsWC == nil) {
+        _diagnosticsWC = [[DiagnosticsWindowController alloc] init];
+    }
+    [_diagnosticsWC show];
+}
+
 #pragma mark -Secure Input
 //While an app turns on Secure Input (password field, Terminal "Secure Keyboard Entry",...),
 //macOS does not send keys to any input method, so OpenKey can not type. Tell the user why.
@@ -645,6 +676,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         _secureInputNotified = NO;
 
         NSString* appName = [self secureInputAppName];
+        VKLog(@"secure-input", @"%@%@", on ? @"on" : @"off", on && appName ? [NSString stringWithFormat:@" by %@ (pid %d)", appName, pid] : @"");
         mnuSecureInput.title = appName ? [NSString stringWithFormat:@"Không gõ được: %@ đang bật Secure Input", appName]
                                        : @"Không gõ được: Secure Input đang bật";
         mnuSecureInput.hidden = !on;
@@ -665,6 +697,14 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         _secureInputNotified = YES;
         [self notifySecureInput];
     }
+}
+
+//nil when Secure Input is off
+-(NSString*)secureInputStatus {
+    if (!_secureInputOn)
+        return nil;
+    NSString* appName = [self secureInputAppName];
+    return appName ? [NSString stringWithFormat:@"%@ (pid %d)", appName, _secureInputPID] : @"?";
 }
 
 //name of the app which turns on Secure Input, nil if unknown
@@ -750,10 +790,12 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
 #pragma mark Reset OpenKey after mac computer awake
 -(void)receiveWakeNote: (NSNotification*)note {
+    VKLog(@"app", @"Mac woke up");
     [OpenKeyManager initEventTap];
 }
 
 -(void)receiveSleepNote: (NSNotification*)note {
+    VKLog(@"app", @"Mac goes to sleep");
     [OpenKeyManager stopEventTap];
 }
 
@@ -762,12 +804,9 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 -(void)activeAppChanged: (NSNotification*)note {
-    InvalidateTargetApp();
-    UpdateExcludedApp();
+    //the typing app changes too: it applies its remembered mode (smart switch) and the "always English" list
+    OnFrontAppChanged();
     [self updateStatusIcon];
-    if (vUseSmartSwitchKey && [OpenKeyManager isInited]) {
-        OnActiveAppChanged();
-    }
 }
 
 -(void)registerSupportedNotification {

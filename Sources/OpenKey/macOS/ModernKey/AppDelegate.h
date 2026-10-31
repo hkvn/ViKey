@@ -12,6 +12,8 @@
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 
+/// reads the settings into the engine and refreshes the menu
+-(void)fillData;
 -(void)onImputMethodChanged:(BOOL)willNotify;
 -(void)onInputMethodSelected;
 -(void)updateStatusIcon;
@@ -25,6 +27,9 @@
 -(void)setGrayIcon:(BOOL)val;
 
 -(void)onMacroSelected;
+-(void)onDiagnosticsSelected;
+/// the app which turns on Secure Input, nil when it is off
+-(NSString*)secureInputStatus;
 -(void)onQuickConvert;
 -(void)setQuickConvertString;
 

@@ -20,7 +20,13 @@ struct MacroData {
     string macroText; //ex: "ms"
     string macroContent; //ex: "millisecond"
     vector<Uint32> macroContentCode; //converted of macroContent
+    bool hasDynamicValue = false; //content has {date}, {clipboard},...: it is filled each time the macro is typed
 };
+
+/**
+ * set by the app: the text in the clipboard (UTF-8), for {clipboard}
+ */
+extern string (*macroClipboardText)();
 
 /**
  * Call when you need to load macro data from disk
@@ -63,13 +69,9 @@ bool deleteMacro(const string& macroText);
 void onTableCodeChange();
 
 /**
- * Save all macro data to disk
+ * Fill the dynamic values of a macro content:
+ * {date} 31/10/2026, {time} 14:05, {weekday} Thứ Bảy, {day} 31, {month} 10, {year} 2026, {clipboard} the text in the clipboard
  */
-void saveToFile(const string& path);
-
-/**
- * Load macro data from disk
- */
-void readFromFile(const string& path, const bool& append=true);
+string fillMacroDynamicValues(const string& content);
 
 #endif /* Macro_h */

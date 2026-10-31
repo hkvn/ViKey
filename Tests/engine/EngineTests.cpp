@@ -8,6 +8,7 @@
 
 #include "Engine.h"
 #include <cstdio>
+#include <ctime>
 #include <map>
 
 extern int vInputType, vCodeTable, vCheckSpelling, vUseModernOrthography, vUseMacro, vFreeMark;
@@ -214,6 +215,37 @@ static void testMacro() {
     vUseMacro = 0;
 }
 
+static string testClipboard() {
+    return "nội dung";
+}
+
+static void testDynamicMacro() {
+    setUp();
+    vUseMacro = 1;
+    initMacroMap(nullptr, 0);
+    macroClipboardText = testClipboard;
+    addMacro("cb", "[{clipboard}]");
+    checkEqual("clipboard in a macro", type("cb "), "[nội dung] ");
+
+    time_t time = std::time(nullptr);
+    struct tm now;
+    localtime_r(&time, &now);
+    char date[32];
+    snprintf(date, sizeof(date), "%02d/%02d/%04d", now.tm_mday, now.tm_mon + 1, now.tm_year + 1900);
+    addMacro("nn", "Hôm nay {date}");
+    checkEqual("date in a macro", type("nn "), string("Hôm nay ") + date + " ");
+    const char* weekdays[] = {"Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"};
+    checkEqual("weekday and year", fillMacroDynamicValues("{weekday}, {year}"),
+               string(weekdays[now.tm_wday]) + ", " + to_string(now.tm_year + 1900));
+    checkEqual("unknown names are kept", fillMacroDynamicValues("{foo} {date"), "{foo} {date");
+    checkEqual("text without values", fillMacroDynamicValues("a:b"), "a:b");
+
+    //the content is filled again each time: the clipboard can change
+    macroClipboardText = nullptr;
+    checkEqual("no clipboard", type("cb "), "[] ");
+    vUseMacro = 0;
+}
+
 static void testAppMemory() {
     initSmartSwitchKey(nullptr, 0);
     //status: bit 0 Vietnamese, other bits code table
@@ -236,6 +268,9 @@ static void testAppMemory() {
     initSmartSwitchKey(saved.data(), (int)saved.size());
     check("status kept after save and load", getAppInputMethodStatus("com.apple.Terminal", 1) == 4);
 
+    check("find does not add the app", findAppInputMethodStatus("com.apple.Notes") == -1 &&
+          findAppInputMethodStatus("com.apple.Notes") == -1 && findAppInputMethodStatus("com.apple.Terminal") == 4);
+
     //the last answer is cached: forgetting the app must clear it
     removeAppInputMethodStatus("com.apple.Terminal");
     check("forgotten app is unknown again", getAppInputMethodStatus("com.apple.Terminal", 1) == -1);
@@ -255,6 +290,7 @@ int main() {
     testConvertTool();
     testUtf8();
     testMacro();
+    testDynamicMacro();
     printf("engine: %d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

@@ -23,6 +23,8 @@ static NSString* toNSString(const string& str) {
 
 #pragma mark - Macro
 
+NSNotificationName const VKMacroStoreDidChangeNotification = @"VKMacroStoreDidChange";
+
 @implementation VKMacro
 -(instancetype)initWithText:(NSString*)text content:(NSString*)content {
     if (self = [super init]) {
@@ -36,14 +38,21 @@ static NSString* toNSString(const string& str) {
 @implementation VKMacroStore
 +(void)save {
     vector<Byte> macroData;
-    getMacroSaveData(macroData);
+    {
+        ENGINE_LOCK;
+        getMacroSaveData(macroData);
+    }
     [[NSUserDefaults standardUserDefaults] setObject:[NSData dataWithBytes:macroData.data() length:macroData.size()] forKey:@"macroData"];
+    [[NSNotificationCenter defaultCenter] postNotificationName:VKMacroStoreDidChangeNotification object:nil];
 }
 
 +(NSArray<VKMacro*>*)allMacros {
     vector<vector<Uint32>> keys;
     vector<string> texts, contents;
-    getAllMacro(keys, texts, contents);
+    {
+        ENGINE_LOCK;
+        getAllMacro(keys, texts, contents);
+    }
     NSMutableArray<VKMacro*>* result = [NSMutableArray arrayWithCapacity:texts.size()];
     for (size_t i = 0; i < texts.size(); i++) {
         [result addObject:[[VKMacro alloc] initWithText:toNSString(texts[i]) content:toNSString(contents[i])]];
@@ -52,26 +61,38 @@ static NSString* toNSString(const string& str) {
 }
 
 +(BOOL)hasMacro:(NSString*)text {
+    ENGINE_LOCK;
     return hasMacro(string(text.UTF8String));
 }
 
 +(void)setMacro:(NSString*)text content:(NSString*)content {
-    addMacro(string(text.UTF8String), string(content.UTF8String));
+    {
+        ENGINE_LOCK;
+        addMacro(string(text.UTF8String), string(content.UTF8String));
+    }
     [self save];
 }
 
 +(void)deleteMacro:(NSString*)text {
-    deleteMacro(string(text.UTF8String));
+    {
+        ENGINE_LOCK;
+        deleteMacro(string(text.UTF8String));
+    }
     [self save];
 }
 
-+(void)importFromFile:(NSString*)path keepCurrent:(BOOL)keepCurrent {
-    readFromFile(string(path.fileSystemRepresentation), keepCurrent);
++(void)addMacros:(NSArray<VKMacro*>*)macros keepCurrent:(BOOL)keepCurrent {
+    {
+        ENGINE_LOCK;
+        if (!keepCurrent)
+            initMacroMap(NULL, 0);
+        for (VKMacro* macro in macros) {
+            string text(macro.text.UTF8String);
+            if (!text.empty() && !hasMacro(text))
+                addMacro(text, string(macro.content.UTF8String));
+        }
+    }
     [self save];
-}
-
-+(void)exportToFile:(NSString*)path {
-    saveToFile(string(path.fileSystemRepresentation));
 }
 @end
 
@@ -151,7 +172,10 @@ static NSString* toNSString(const string& str) {
 +(NSDictionary<NSString*, NSNumber*>*)allApps {
     vector<string> bundleIds;
     vector<int> statuses;
-    getAllAppInputMethodStatus(bundleIds, statuses);
+    {
+        ENGINE_LOCK;
+        getAllAppInputMethodStatus(bundleIds, statuses);
+    }
     NSMutableDictionary<NSString*, NSNumber*>* result = [NSMutableDictionary dictionaryWithCapacity:bundleIds.size()];
     for (size_t i = 0; i < bundleIds.size(); i++) {
         result[toNSString(bundleIds[i])] = @(statuses[i]);
@@ -160,16 +184,19 @@ static NSString* toNSString(const string& str) {
 }
 
 +(void)setStatus:(int)status forApp:(NSString*)bundleId {
+    ENGINE_LOCK;
     setAppInputMethodStatus(string(bundleId.UTF8String), status);
     saveSmartSwitchKeyData();
 }
 
 +(void)removeApp:(NSString*)bundleId {
+    ENGINE_LOCK;
     removeAppInputMethodStatus(string(bundleId.UTF8String));
     saveSmartSwitchKeyData();
 }
 
 +(void)removeAllApps {
+    ENGINE_LOCK;
     vector<string> bundleIds;
     vector<int> statuses;
     getAllAppInputMethodStatus(bundleIds, statuses);

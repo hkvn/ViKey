@@ -11,7 +11,7 @@
 #include "Engine.h"
 #include <iostream>
 #include <memory.h>
-#include <fstream>
+#include <ctime>
 
 using namespace std;
 
@@ -25,6 +25,66 @@ static bool _macroFlag = false;
 static Uint16 _kChar = 0;
 static Uint32 _charBuff;
 static int _kMacro;
+
+string (*macroClipboardText)() = nullptr;
+
+static const char* _dynamicValueNames[] = {"{date}", "{time}", "{weekday}", "{day}", "{month}", "{year}", "{clipboard}"};
+static const char* _weekdays[] = {"Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"};
+
+static bool hasDynamicValue(const string& content) {
+    for (const char* name : _dynamicValueNames) {
+        if (content.find(name) != string::npos)
+            return true;
+    }
+    return false;
+}
+
+static string dynamicValue(const string& name, const struct tm& now, bool& known) {
+    char buff[32];
+    known = true;
+    if (name == "{date}") {
+        snprintf(buff, sizeof(buff), "%02d/%02d/%04d", now.tm_mday, now.tm_mon + 1, now.tm_year + 1900);
+    } else if (name == "{time}") {
+        snprintf(buff, sizeof(buff), "%02d:%02d", now.tm_hour, now.tm_min);
+    } else if (name == "{weekday}") {
+        return _weekdays[now.tm_wday];
+    } else if (name == "{day}") {
+        snprintf(buff, sizeof(buff), "%d", now.tm_mday);
+    } else if (name == "{month}") {
+        snprintf(buff, sizeof(buff), "%d", now.tm_mon + 1);
+    } else if (name == "{year}") {
+        snprintf(buff, sizeof(buff), "%d", now.tm_year + 1900);
+    } else if (name == "{clipboard}") {
+        return macroClipboardText != nullptr ? macroClipboardText() : "";
+    } else {
+        known = false;
+        return "";
+    }
+    return buff;
+}
+
+string fillMacroDynamicValues(const string& content) {
+    if (!hasDynamicValue(content))
+        return content;
+    time_t time = std::time(nullptr);
+    struct tm now;
+    localtime_r(&time, &now);
+    string result;
+    size_t i = 0, end;
+    bool known;
+    while (i < content.size()) {
+        if (content[i] == '{' && (end = content.find('}', i)) != string::npos) {
+            string value = dynamicValue(content.substr(i, end - i + 1), now, known);
+            if (known) {
+                result += value;
+                i = end + 1;
+                continue;
+            }
+        }
+        result += content[i++];
+    }
+    return result;
+}
 
 static void convert(const string& str, vector<Uint32>& outData) {
     outData.clear();
@@ -100,6 +160,7 @@ void initMacroMap(const Byte* pData, const int& size) {
         MacroData data;
         data.macroText = macroText;
         data.macroContent = macroContent;
+        data.hasDynamicValue = hasDynamicValue(macroContent);
         
         vector<Uint32> key;
         convert(macroText, key);
@@ -152,14 +213,20 @@ static bool modifyCaseUnicode(Uint32& code, const bool& isUpperCase=true) {
     return false;
 }
 
+//content to type: dynamic values are filled now
+static void getContentCode(const MacroData& data, vector<Uint32>& macroContentCode) {
+    if (data.hasDynamicValue)
+        convert(fillMacroDynamicValues(data.macroContent), macroContentCode);
+    else
+        macroContentCode = data.macroContentCode;
+}
+
 bool findMacro(vector<Uint32>& key, vector<Uint32>& macroContentCode) {
     for (c = 0; c < key.size(); c++) {
         key[c] = getCharacterCode(key[c]);
     }
     if (macroMap.find(key) != macroMap.end()) {
-        macroContentCode.clear();
-        MacroData data = macroMap[key];
-        macroContentCode = data.macroContentCode;
+        getContentCode(macroMap[key], macroContentCode);
         return true;
     }
     if (vAutoCapsMacro) {
@@ -173,9 +240,7 @@ bool findMacro(vector<Uint32>& key, vector<Uint32>& macroContentCode) {
         
         if (key.size() > 0 && modifyCaseUnicode(key[0], false)) {
             if (macroMap.find(key) != macroMap.end()) {
-                macroContentCode.clear();
-                MacroData data = macroMap[key];
-                macroContentCode = data.macroContentCode;
+                getContentCode(macroMap[key], macroContentCode);
                 for (c = 0; c < macroContentCode.size(); c++) {
                     if (c == 0 || _macroFlag) {
                         _kChar = keyCodeToCharacter(macroContentCode[c]);
@@ -220,10 +285,12 @@ bool addMacro(const string& macroText, const string& macroContent) {
         MacroData data;
         data.macroText = macroText;
         data.macroContent = macroContent;
+        data.hasDynamicValue = hasDynamicValue(macroContent);
         convert(macroContent, data.macroContentCode);
         macroMap[key] = data;
     } else { //edit this macro
         macroMap[key].macroContent = macroContent;
+        macroMap[key].hasDynamicValue = hasDynamicValue(macroContent);
         convert(macroContent, macroMap[key].macroContentCode);
     }
     return true;
@@ -242,52 +309,5 @@ bool deleteMacro(const string& macroText) {
 void onTableCodeChange() {
     for (std::map<vector<Uint32>, MacroData>::iterator it = macroMap.begin(); it != macroMap.end(); ++it) {
         convert(it->second.macroContent, it->second.macroContentCode);
-    }
-}
-
-void saveToFile(const string& path) {
-    ofstream myfile;
-    myfile.open(path.c_str());
-    myfile << ";Compatible OpenKey Macro Data file for UniKey*** version=1 ***\n";
-    for (std::map<vector<Uint32>, MacroData>::iterator it = macroMap.begin(); it != macroMap.end(); ++it) {
-        myfile <<it->second.macroText << ":" << it->second.macroContent<<"\n";
-    }
-    myfile.close();
-}
-
-void readFromFile(const string& path, const bool& append) {
-    ifstream myfile(path.c_str());
-    string line;
-    int k = 0;
-    size_t pos = 0;
-    string name, content;
-    if (myfile.is_open()) {
-        if (!append) {
-            macroMap.clear();
-        }
-        while (getline (myfile,line) ) {
-            k++;
-            if (k == 1) continue;
-            pos = line.find(":");
-            if (string::npos != pos) {
-                name = line.substr(0, pos);
-                content = line.substr(pos + 1, line.length() - pos - 1);
-				while (name.compare("") == 0 && content.compare("") != 0) {
-					pos = content.find(":");
-					if (string::npos != pos) {
-						name += ":";
-						name += content.substr(0, pos);
-						content = content.substr(pos + 1, line.length() - pos - 1);
-					} else {
-						break;
-					}
-				}
-
-                if (name.compare("") != 0 && !hasMacro(name)) {
-                    addMacro(name, content);
-                }
-            }
-        }
-        myfile.close();
     }
 }

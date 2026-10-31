@@ -90,8 +90,80 @@ struct SettingsModelTests {
         check("hotkey never set", HotKey.title(of: 0) == "Không")
         check("hotkey option flag", HotKey.with(.option, on: true, in: 0) == 0x200 && HotKey.with(.option, on: false, in: 0x200) == 0)
 
+        testMacroFile()
+        testMacroSync(defaults: defaults)
+
         defaults.removePersistentDomain(forName: suiteName)
         print("settings: \(checks) checks, \(failures) failures")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    //macro files of UniKey, EVKey, OpenKey and the macOS text replacements
+    static func testMacroFile() {
+        let unikey = ";DO NOT DELETE THIS LINE*** version=1 ***\r\nvn:Việt Nam\r\n:):☺\r\nno colon\r\nk:a:b\r\n"
+        let expected = [MacroFile.Entry(text: "vn", content: "Việt Nam"), .init(text: ":)", content: "☺"), .init(text: "k", content: "a:b")]
+        check("UniKey file", MacroFile.read(Data(unikey.utf8)) == expected)
+        check("UTF-8 file with a BOM", MacroFile.read(Data([0xEF, 0xBB, 0xBF]) + Data(unikey.utf8)) == expected)
+        check("UTF-16 file with a BOM", MacroFile.read(Data([0xFF, 0xFE]) + unikey.data(using: .utf16LittleEndian)!) == expected)
+        check("UTF-16 file without a BOM", MacroFile.read(unikey.data(using: .utf16LittleEndian)!) == expected)
+        check("file without a header keeps the first line", MacroFile.read(Data("a:b\nc:d".utf8)).count == 2)
+
+        let plist = try! PropertyListSerialization.data(fromPropertyList: [["shortcut": "omw", "phrase": "On my way!"], ["phrase": "no shortcut"]],
+                                                        format: .xml, options: 0)
+        check("macOS text replacements", MacroFile.read(plist) == [.init(text: "omw", content: "On my way!")])
+
+        let written = MacroFile.text(of: expected)
+        check("written file starts with the UniKey header", written.hasPrefix(MacroFile.header + "\n"))
+        check("written file is read back", MacroFile.read(Data(written.utf8)) == expected)
+        check("line breaks become spaces", MacroFile.text(of: [.init(text: "a", content: "x\ny")]).contains("\na:x y\n"))
+    }
+
+    //macro sync through a file in a synced folder
+    static func testMacroSync(defaults: UserDefaults) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vikey-sync-tests-\(getpid())", isDirectory: true)
+        let fileURL = folder.appendingPathComponent(MacroSync.fileName)
+        try? FileManager.default.removeItem(at: folder)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        func macros() -> [String: String] {
+            Dictionary(VKMacroStore.allMacros().map { ($0.text, $0.content) }, uniquingKeysWith: { first, _ in first })
+        }
+        func fileTexts() -> Set<String> {
+            Set(MacroFile.read((try? Data(contentsOf: fileURL)) ?? Data()).map(\.text))
+        }
+        //another Mac writes the file
+        func writeFile(_ entries: [MacroFile.Entry], date: Date) {
+            try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try! Data((entries.isEmpty ? "" : MacroFile.text(of: entries)).utf8).write(to: fileURL)
+            try! FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: fileURL.path)
+        }
+
+        VKMacroStore.addMacros([VKMacro(text: "a", content: "this Mac")], keepCurrent: false)
+        writeFile([.init(text: "a", content: "other Mac"), .init(text: "b", content: "other Mac")], date: Date(timeIntervalSinceNow: -100))
+        let sync = MacroSync(defaults: defaults)
+        sync.setFolder(folder)
+        sync.setEnabled(true)
+        check("turning sync on keeps both sides, this Mac wins", macros() == ["a": "this Mac", "b": "other Mac"])
+        check("turning sync on writes the file", fileTexts() == ["a", "b"])
+
+        writeFile([.init(text: "c", content: "changed")], date: Date(timeIntervalSinceNow: 100))
+        sync.checkFile()
+        check("a changed file replaces the macros", macros() == ["c": "changed"])
+
+        VKMacroStore.setMacro("d", content: "new")
+        sync.flushPendingWrite()
+        check("a change of this Mac is written", fileTexts() == ["c", "d"])
+
+        writeFile([.init(text: "e", content: "other Mac")], date: Date(timeIntervalSinceNow: 200))
+        VKMacroStore.setMacro("f", content: "new")
+        sync.flushPendingWrite()
+        check("when both changed, both are kept", macros().keys.sorted() == ["c", "d", "e", "f"] && fileTexts() == ["c", "d", "e", "f"])
+
+        writeFile([], date: Date(timeIntervalSinceNow: 300))
+        sync.checkFile()
+        check("an empty file does not remove the macros", macros().count == 4)
+
+        sync.setEnabled(false)
+        VKMacroStore.addMacros([], keepCurrent: false)
     }
 }

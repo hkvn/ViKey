@@ -12,6 +12,10 @@
 		A5C0FFEE2A00000000000010 /* MacroWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A0000000000000F /* MacroWindow.swift */; };
 		A5C0FFEE2A00000000000012 /* ConvertToolWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000011 /* ConvertToolWindow.swift */; };
 		A5C0FFEE2A00000000000014 /* AppsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000013 /* AppsModel.swift */; };
+		A5C0FFEE2A00000000000023 /* Logging.m in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000022 /* Logging.m */; };
+		A5C0FFEE2A00000000000025 /* DiagnosticsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000024 /* DiagnosticsWindow.swift */; };
+		A5C0FFEE2A00000000000027 /* MacroFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000026 /* MacroFile.swift */; };
+		A5C0FFEE2A00000000000029 /* MacroSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000028 /* MacroSync.swift */; };
 		A5C0FFEE2A00000000000004 /* SettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000003 /* SettingsModel.swift */; };
 		A5C0FFEE2A00000000000006 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000005 /* SettingsView.swift */; };
 		A5C0FFEE2A00000000000008 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0FFEE2A00000000000007 /* SettingsWindowController.swift */; };
@@ -54,6 +58,11 @@
 		A5C0FFEE2A0000000000000F /* MacroWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroWindow.swift; sourceTree = "<group>"; };
 		A5C0FFEE2A00000000000011 /* ConvertToolWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvertToolWindow.swift; sourceTree = "<group>"; };
 		A5C0FFEE2A00000000000013 /* AppsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppsModel.swift; sourceTree = "<group>"; };
+		A5C0FFEE2A00000000000020 /* Logging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Logging.h; sourceTree = "<group>"; };
+		A5C0FFEE2A00000000000022 /* Logging.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Logging.m; sourceTree = "<group>"; };
+		A5C0FFEE2A00000000000024 /* DiagnosticsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsWindow.swift; sourceTree = "<group>"; };
+		A5C0FFEE2A00000000000026 /* MacroFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroFile.swift; sourceTree = "<group>"; };
+		A5C0FFEE2A00000000000028 /* MacroSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroSync.swift; sourceTree = "<group>"; };
 		A5C0FFEE2A00000000000003 /* SettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModel.swift; sourceTree = "<group>"; };
 		A5C0FFEE2A00000000000005 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A5C0FFEE2A00000000000007 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
@@ -195,6 +204,11 @@
 				A5C0FFEE2A0000000000000F /* MacroWindow.swift */,
 				A5C0FFEE2A00000000000011 /* ConvertToolWindow.swift */,
 				A5C0FFEE2A00000000000013 /* AppsModel.swift */,
+				A5C0FFEE2A00000000000020 /* Logging.h */,
+				A5C0FFEE2A00000000000022 /* Logging.m */,
+				A5C0FFEE2A00000000000024 /* DiagnosticsWindow.swift */,
+				A5C0FFEE2A00000000000026 /* MacroFile.swift */,
+				A5C0FFEE2A00000000000028 /* MacroSync.swift */,
 			);
 			path = ModernKey;
 			sourceTree = "<group>";
@@ -369,6 +383,10 @@
 				A5C0FFEE2A00000000000010 /* MacroWindow.swift in Sources */,
 				A5C0FFEE2A00000000000012 /* ConvertToolWindow.swift in Sources */,
 				A5C0FFEE2A00000000000014 /* AppsModel.swift in Sources */,
+				A5C0FFEE2A00000000000023 /* Logging.m in Sources */,
+				A5C0FFEE2A00000000000025 /* DiagnosticsWindow.swift in Sources */,
+				A5C0FFEE2A00000000000027 /* MacroFile.swift in Sources */,
+				A5C0FFEE2A00000000000029 /* MacroSync.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

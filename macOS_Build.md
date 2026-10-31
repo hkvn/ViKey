@@ -31,8 +31,17 @@ Nếu build trong Xcode, hãy chọn team của bạn trong *Signing & Capabilit
 scripts/run-tests.sh
 ```
 
-- `Tests/engine`: bộ gõ (Telex, VNI, chính tả, cách đặt dấu), công cụ chuyển mã, gõ tắt, chuyển đổi UTF-8. Viết bằng C++, không cần Xcode project.
-- `Tests/settings`: logic của cửa sổ Cài đặt (phím tắt, các tuỳ chọn), dùng bản giả của AppDelegate nên không đụng tới cài đặt thật.
+- `Tests/engine`: bộ gõ (Telex, VNI, chính tả, cách đặt dấu), công cụ chuyển mã, gõ tắt (cả giá trị tự động như `{date}`), bộ nhớ theo ứng dụng, chuyển đổi UTF-8. Viết bằng C++, không cần Xcode project.
+- `Tests/settings`: logic của cửa sổ Cài đặt (phím tắt, các tuỳ chọn), đọc file gõ tắt của UniKey / EVKey / macOS, đồng bộ gõ tắt qua thư mục. Dùng bản giả của AppDelegate nên không đụng tới cài đặt thật.
+
+### Luồng bắt phím và nhật ký
+
+- ViKey nhận phím trên một luồng riêng (`OpenKeyManager`), để cửa sổ hay hộp thoại trên luồng chính không làm chậm việc gõ. Bộ gõ và dữ liệu dùng chung (gõ tắt, bộ nhớ theo ứng dụng, phiên gõ) được bảo vệ bằng `ENGINE_LOCK` (xem `Engine.h`). Luồng bắt phím không bao giờ chờ luồng chính, chỉ gửi việc bằng `dispatch_async`.
+- Nhật ký dùng `VKLog` (`Logging.h`): hiện trong cửa sổ *Chẩn đoán…* và trong Console.app với subsystem `com.hkvn.vikey`. Không bao giờ ghi nội dung người dùng gõ.
+
+  ```sh
+  log show --last 1h --predicate 'subsystem == "com.hkvn.vikey"' --style compact
+  ```
 
 GitHub Actions (`.github/workflows/macos.yml`) chạy kiểm thử và build ViKey khi một bản phát hành được publish trên GitHub, để kiểm tra bản đó build được trên máy sạch. Có thể chạy tay bằng nút **Run workflow** trong tab Actions. Script phát hành cũng chạy kiểm thử trên máy của bạn trước khi build.
 

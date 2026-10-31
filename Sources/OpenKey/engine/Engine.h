@@ -10,6 +10,7 @@
 #define Engine_h
 
 #include <locale>
+#include <mutex>
 
 #include "DataType.h"
 #include "Vietnamese.h"
@@ -234,6 +235,13 @@ void vSetCheckSpelling();
  * temporarily turn off OpenKey engine
  */
 void vTempOffEngine(const bool& off=true);
+
+/**
+ * The app reads keys on its own thread and changes engine data (macros, per-app memory, new session,...)
+ * on the main thread: hold this lock while using the engine. It can be locked again on the same thread
+ */
+std::recursive_mutex& engineMutex();
+#define ENGINE_LOCK std::lock_guard<std::recursive_mutex> _engineLock(engineMutex())
 
 /**
  * some utils function

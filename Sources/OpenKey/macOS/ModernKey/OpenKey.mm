@@ -8,11 +8,14 @@
 #import <Cocoa/Cocoa.h>
 #import <Carbon/Carbon.h>
 #import <Foundation/Foundation.h>
+#include <atomic>
+#include <mach/mach_time.h>
 #import "Engine.h"
 #import "AppDelegate.h"
 #import "OpenKeyManager.h"
+#import "EngineBridge.h"
+#import "Logging.h"
 
-#define FRONT_APP [[NSWorkspace sharedWorkspace] frontmostApplication].bundleIdentifier
 #define OTHER_CONTROL_KEY (_flag & kCGEventFlagMaskCommand) || (_flag & kCGEventFlagMaskControl) || \
                             (_flag & kCGEventFlagMaskAlternate) || (_flag & kCGEventFlagMaskSecondaryFn) || \
                             (_flag & kCGEventFlagMaskNumericPad) || (_flag & kCGEventFlagMaskHelp)
@@ -22,6 +25,10 @@
 #define EMPTY_HOTKEY 0xFE0000FE
 #define LOAD_DATA(VAR, KEY) VAR = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@#KEY]
 #define TARGET_APP_MAX_AGE 0.5 //seconds, see getTargetApp()
+#define TARGET_APP_CHECK_DELAY 0.3 //seconds, see CheckTypingAppSoon()
+#define AX_TIMEOUT 0.05 //seconds, see FocusedApp()
+#define SLOW_EVENT_LOG 20000 //microseconds: handling one event slower than this is logged
+#define MAX_CLIPBOARD_MACRO 2000 //characters of {clipboard} in a macro
 
 // Ignore code for Modifier keys and numpad
 // Reference: https://eastmanreference.com/complete-list-of-applescript-key-codes
@@ -46,6 +53,9 @@ extern int vSendKeyStepByStep;
 extern int vFixChromiumBrowser;
 extern int vPerformLayoutCompat;
 
+//The keys are handled on a thread of their own (see OpenKeyManager), the app changes settings and engine data on the
+//main thread: the variables below and the engine are used only while holding the engine lock (see ENGINE_LOCK).
+//The keyboard thread never waits for the main thread, so the main thread can hold the lock without a deadlock.
 extern "C" {
     //app which must sent special empty character
     NSArray* _niceSpaceApp = @[@"com.sublimetext.3",
@@ -83,25 +93,84 @@ extern "C" {
     int _languageTemp = 0; //use for smart switch key
     vector<Byte> savedSmartSwitchKeyData; ////use for smart switch key
     
-    NSString* _frontMostApp = @"UnknownApp";
-    NSString* _targetApp = nil; //app which receives the keys, see getTargetApp()
-    CFAbsoluteTime _targetAppTime = 0;
-    bool _isEnglishInputSource = true; //see UpdateInputSourceLanguage()
+    bool _inited = false; //OpenKeyInit() has loaded the settings and the engine data
     
-    //for "turn off Vietnamese when in other language". Asking macOS on every key is slow (about 28 µs),
-    //so this is updated only when the keyboard input source changes
+    NSString* _frontApp = @""; //frontmost app, see OnFrontAppChanged()
+    pid_t _frontPid = 0;
+    NSString* _targetApp = nil; //app which receives the keys, nil when it must be checked again, see getTargetApp()
+    CFAbsoluteTime _targetAppTime = 0;
+    NSString* _typingApp = @""; //last value of _targetApp
+    NSString* _memoryApp = @""; //last typing app which is not ViKey: smart switch remembers the mode for it
+    bool _checkTypingAppPending = false;
+    
+    //see FocusedApp()
+    AXUIElementRef _systemWide = NULL;
+    pid_t _focusedPid = 0;
+    NSString* _focusedApp = nil;
+    bool _accessibilityAnswered = true;
+    
+    //for the diagnostics window
+    NSInteger _detectMethod = 0; //see VKEngineStatus.detectMethod
+    double _detectTime = 0; //microseconds
+    uint64_t _eventCount = 0, _eventTotalTime = 0, _eventMaxTime = 0; //mach time units
+    std::atomic<int> _tapRestartCount(0);
+    mach_timebase_info_data_t _timebase;
+    
+    //see UpdateInputSourceLanguage()
+    bool _isEnglishInputSource = true;
+    NSString* _inputSource = @"";
+    CFDataRef _keyboardLayout = NULL; //'uchr' data of the keyboard layout, see ConvertEventToKeyboadLayoutCompatKeyCode()
+    UInt32 _keyboardType = 0;
+    
+    void EngineLock() {
+        engineMutex().lock();
+    }
+    
+    void EngineUnlock() {
+        engineMutex().unlock();
+    }
+    
+    double MachToMicroseconds(uint64_t time) {
+        if (_timebase.denom == 0)
+            mach_timebase_info(&_timebase);
+        return (double)time * _timebase.numer / _timebase.denom / 1000.0;
+    }
+    
+    //for "turn off Vietnamese when in other language" and "Telex on other layouts". Asking macOS on every key is slow
+    //(about 28 µs) and must happen on the main thread, so this is updated only when the keyboard input source changes
     void UpdateInputSourceLanguage() {
-        _isEnglishInputSource = true;
+        bool isEnglish = true;
+        NSString* inputSource = @"";
         TISInputSourceRef isource = TISCopyCurrentKeyboardInputSource();
         if (isource != NULL) {
             //languages is owned by isource: read it before releasing isource
             CFArrayRef languages = (CFArrayRef) TISGetInputSourceProperty(isource, kTISPropertyInputSourceLanguages);
             if (languages != NULL && CFArrayGetCount(languages) > 0) {
                 NSString *currentLanguage = (__bridge NSString *)CFArrayGetValueAtIndex(languages, 0);
-                _isEnglishInputSource = [currentLanguage isLike:@"en"];
+                isEnglish = [currentLanguage isLike:@"en"];
             }
+            NSString* sourceId = (__bridge NSString *)TISGetInputSourceProperty(isource, kTISPropertyInputSourceID);
+            inputSource = [sourceId copy] ?: @"";
             CFRelease(isource);
         }
+        CFDataRef keyboardLayout = NULL;
+        TISInputSourceRef layout = TISCopyCurrentKeyboardLayoutInputSource();
+        if (layout != NULL) {
+            CFDataRef data = (CFDataRef) TISGetInputSourceProperty(layout, kTISPropertyUnicodeKeyLayoutData);
+            if (data != NULL)
+                keyboardLayout = CFDataCreateCopy(kCFAllocatorDefault, data);
+            CFRelease(layout);
+        }
+        
+        ENGINE_LOCK;
+        if (![inputSource isEqualToString:_inputSource])
+            VKLog(@"keyboard", @"input source: %@", inputSource);
+        _isEnglishInputSource = isEnglish;
+        _inputSource = inputSource;
+        if (_keyboardLayout != NULL)
+            CFRelease(_keyboardLayout);
+        _keyboardLayout = keyboardLayout;
+        _keyboardType = LMGetKbdType();
     }
     
     static void OnInputSourceChanged(CFNotificationCenterRef center, void *observer, CFNotificationName name,
@@ -113,22 +182,35 @@ extern "C" {
     NSSet<NSString*>* _excludedApps = nil;
     bool _isExcludedAppActive = false;
     
-    //call when the frontmost app changes
-    void UpdateExcludedApp() {
-        NSString* app = FRONT_APP;
-        _isExcludedAppActive = app != nil && [_excludedApps containsObject:app];
-    }
-    
     void ReloadExcludedApps() {
-        _excludedApps = [NSSet setWithArray:[[NSUserDefaults standardUserDefaults] stringArrayForKey:@"ExcludedApps"] ?: @[]];
-        UpdateExcludedApp();
+        NSSet<NSString*>* excludedApps = [NSSet setWithArray:[[NSUserDefaults standardUserDefaults] stringArrayForKey:@"ExcludedApps"] ?: @[]];
+        ENGINE_LOCK;
+        _excludedApps = excludedApps;
+        _isExcludedAppActive = [_excludedApps containsObject:_typingApp];
     }
     
     bool IsExcludedAppActive() {
         return _isExcludedAppActive;
     }
     
+    //for {clipboard} in macros
+    static string ReadClipboardText() {
+        NSString* text = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString] ?: @"";
+        if (text.length > MAX_CLIPBOARD_MACRO)
+            text = [text substringWithRange:[text rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, MAX_CLIPBOARD_MACRO)]];
+        return string(text.UTF8String ?: "");
+    }
+    
+    void UpdateFrontApp() {
+        NSRunningApplication* front = [[NSWorkspace sharedWorkspace] frontmostApplication];
+        NSString* app = front.bundleIdentifier ?: (front.localizedName ?: @"");
+        ENGINE_LOCK;
+        _frontApp = app;
+        _frontPid = front.processIdentifier;
+    }
+    
     void OpenKeyInit() {
+        ENGINE_LOCK;
         //load saved data
         vFreeMark = 0;//(int)[[NSUserDefaults standardUserDefaults] integerForKey:@"FreeMark"];
         LOAD_DATA(vCodeTable, CodeTable); if (vCodeTable < 0) vCodeTable = 0;
@@ -168,6 +250,7 @@ extern "C" {
         NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
         NSData *data = [prefs objectForKey:@"macroData"];
         initMacroMap((Byte*)data.bytes, (int)data.length);
+        macroClipboardText = ReadClipboardText;
         
         //init and load smart switch key data
         data = [prefs objectForKey:@"smartSwitchKey"];
@@ -198,29 +281,29 @@ extern "C" {
         }
         UpdateInputSourceLanguage();
         ReloadExcludedApps();
+        UpdateFrontApp();
+        //the first key checks the typing app, which also applies its remembered mode
+        _targetApp = nil;
+        _typingApp = @"";
+        _inited = true;
     }
     
     //the focus may be in another app or panel now: check the target app again
     void InvalidateTargetApp() {
+        ENGINE_LOCK;
         _targetApp = nil;
     }
     
     void RequestNewSession() {
+        ENGINE_LOCK;
+        if (!_inited)
+            return;
         //send event signal to Engine
         vKeyHandleEvent(vKeyEvent::Mouse, vKeyEventState::MouseDown, 0);
         InvalidateTargetApp();
         
         if (IS_DOUBLE_CODE(vCodeTable)) { //VNI
             _syncKey.clear();
-        }
-    }
-    
-    void queryFrontMostApp() {
-        if ([[[NSWorkspace sharedWorkspace] frontmostApplication].bundleIdentifier compare:OPENKEY_BUNDLE] != 0) {
-            _frontMostApp = [[NSWorkspace sharedWorkspace] frontmostApplication].bundleIdentifier;
-            if (_frontMostApp == nil)
-                _frontMostApp = [[NSWorkspace sharedWorkspace] frontmostApplication].localizedName != nil ?
-                [[NSWorkspace sharedWorkspace] frontmostApplication].localizedName : @"UnknownApp";
         }
     }
     
@@ -256,17 +339,152 @@ extern "C" {
         return false;
     }
 
-    //Spotlight panel takes keys but it is never the frontmost app. Checking it is slow (about 0.4 ms),
+    //bundle id of the app with the keyboard focus, nil if Accessibility does not answer. Panels such as Spotlight,
+    //Alfred, Raycast or the emoji picker take the keys without becoming the frontmost app
+    NSString* FocusedApp() {
+        if (_systemWide == NULL) {
+            _systemWide = AXUIElementCreateSystemWide();
+            //an app which does not respond must not stop typing
+            AXUIElementSetMessagingTimeout(_systemWide, AX_TIMEOUT);
+        }
+        CFTypeRef app = NULL;
+        pid_t pid = 0;
+        _accessibilityAnswered = AXUIElementCopyAttributeValue(_systemWide, kAXFocusedApplicationAttribute, &app) == kAXErrorSuccess && app != NULL;
+        if (!_accessibilityAnswered)
+            return nil;
+        AXUIElementGetPid((AXUIElementRef)app, &pid);
+        CFRelease(app);
+        if (pid <= 0)
+            return nil;
+        if (pid == _frontPid)
+            return _frontApp;
+        //asking for the bundle id is slow (about 50 µs): remember the last answer
+        if (pid != _focusedPid) {
+            NSRunningApplication* focused = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+            _focusedPid = pid;
+            _focusedApp = focused.bundleIdentifier ?: focused.localizedName;
+        }
+        return _focusedApp;
+    }
+    
+    NSString* DetectTargetApp() {
+        uint64_t start = mach_absolute_time();
+        NSString* app = FocusedApp();
+        if (app != nil && ![app isEqualToString:_frontApp]) {
+            _detectMethod = 1;
+        } else if (isSpotlightVisible()) { //in case Accessibility does not see the Spotlight panel
+            app = @"com.apple.Spotlight";
+            _detectMethod = 2;
+        } else {
+            app = _frontApp;
+            _detectMethod = 0;
+        }
+        _detectTime = MachToMicroseconds(mach_absolute_time() - start);
+        return app ?: @"";
+    }
+    
+    void saveSmartSwitchKeyData() {
+        ENGINE_LOCK;
+        getSmartSwitchKeySaveData(savedSmartSwitchKeyData);
+        NSData* _data = [NSData dataWithBytes:savedSmartSwitchKeyData.data() length:savedSmartSwitchKeyData.size()];
+        NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+        [prefs setObject:_data forKey:@"smartSwitchKey"];
+    }
+    
+    //the engine changed the mode itself: save it now, so the settings never show an old mode, then refresh the menu
+    void SaveModeAndRefreshMenu() {
+        [[NSUserDefaults standardUserDefaults] setInteger:vLanguage forKey:@"InputMethod"];
+        [[NSUserDefaults standardUserDefaults] setInteger:vCodeTable forKey:@"CodeTable"];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [appDelegate fillData];
+        });
+    }
+    
+    //per-app memory: the app keeps the current mode
+    void RememberAppMode() {
+        if (_memoryApp.length == 0)
+            return;
+        setAppInputMethodStatus(string(_memoryApp.UTF8String), vLanguage | (vCodeTable << 1));
+        saveSmartSwitchKeyData();
+    }
+    
+    //the keys go to another app or panel now: apply its remembered mode (smart switch).
+    //addNewApp: remember the mode for an app seen the first time; not after a click, which also opens menu bar items
+    void OnTypingAppChanged(NSString* app, bool addNewApp) {
+        VKLog(@"app", @"typing in %@%@", app, _detectMethod == 1 ? @" (focused panel)" : (_detectMethod == 2 ? @" (Spotlight window)" : @""));
+        _typingApp = app;
+        _isExcludedAppActive = [_excludedApps containsObject:app];
+        if (app.length > 0 && ![app isEqualToString:OPENKEY_BUNDLE]) {
+            _memoryApp = app;
+            if (vUseSmartSwitchKey) {
+                _languageTemp = addNewApp ? getAppInputMethodStatus(string(app.UTF8String), vLanguage | (vCodeTable << 1))
+                                          : findAppInputMethodStatus(string(app.UTF8String));
+                if (_languageTemp == -1) { //new app: it keeps the current mode
+                    if (addNewApp)
+                        saveSmartSwitchKeyData();
+                } else {
+                    bool changed = false;
+                    if ((_languageTemp & 0x01) != vLanguage) {
+                        vLanguage = _languageTemp & 0x01;
+                        changed = true;
+                    }
+                    if (vRememberCode && (_languageTemp >> 1) != vCodeTable) { //for remember table code feature
+                        vCodeTable = _languageTemp >> 1;
+                        onTableCodeChange();
+                        changed = true;
+                    }
+                    if (changed) {
+                        VKLog(@"app", @"remembered mode: %@, code table %d", vLanguage ? @"Vietnamese" : @"English", vCodeTable);
+                        startNewSession();
+                        _syncKey.clear();
+                        SaveModeAndRefreshMenu();
+                    }
+                }
+            }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [appDelegate updateStatusIcon];
+        });
+    }
+    
+    //Panels such as Spotlight take keys but they are never the frontmost app. Checking it is slow (about 0.4 ms),
     //so check again only after something which can move the focus (see InvalidateTargetApp), or when the answer is old
-    NSString* getTargetApp() {
+    NSString* getTargetApp(bool addNewApp=true) {
         CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
         if (_targetApp == nil || now - _targetAppTime > TARGET_APP_MAX_AGE) {
-            _targetApp = isSpotlightVisible() ? @"com.apple.Spotlight" : FRONT_APP;
-            if (_targetApp == nil)
-                _targetApp = @"";
+            _targetApp = DetectTargetApp();
             _targetAppTime = now;
+            if (![_targetApp isEqualToString:_typingApp])
+                OnTypingAppChanged(_targetApp, addNewApp);
         }
         return _targetApp;
+    }
+    
+    //the focus may move after this event (Spotlight opens, a panel closes,...): check the app again soon,
+    //so the menu bar icon and the remembered mode follow it before the next key
+    void CheckTypingAppSoon() {
+        if (_checkTypingAppPending)
+            return;
+        _checkTypingAppPending = true;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(TARGET_APP_CHECK_DELAY * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            ENGINE_LOCK;
+            _checkTypingAppPending = false;
+            if (!_inited)
+                return;
+            _targetApp = nil;
+            getTargetApp(false);
+        });
+    }
+    
+    //call on the main thread when the frontmost app changes
+    void OnFrontAppChanged() {
+        UpdateFrontApp();
+        ENGINE_LOCK;
+        if (!_inited)
+            return;
+        //the menu bar icon and the remembered mode follow the new app at once
+        _targetApp = nil;
+        getTargetApp();
     }
 
     BOOL shouldUseRecommendWorkaround() {
@@ -277,52 +495,23 @@ extern "C" {
         return [_recommendWorkaroundDisabledApp containsObject:getTargetApp()];
     }
     
-    void saveSmartSwitchKeyData() {
-        getSmartSwitchKeySaveData(savedSmartSwitchKeyData);
-        NSData* _data = [NSData dataWithBytes:savedSmartSwitchKeyData.data() length:savedSmartSwitchKeyData.size()];
-        NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-        [prefs setObject:_data forKey:@"smartSwitchKey"];
-    }
-    
-    void OnActiveAppChanged() { //use for smart switch key; improved on Sep 28th, 2019
-        queryFrontMostApp();
-        _languageTemp = getAppInputMethodStatus(string(_frontMostApp.UTF8String), vLanguage | (vCodeTable << 1));
-        if ((_languageTemp & 0x01) != vLanguage) { //for input method
-            if (_languageTemp != -1) {
-                vLanguage = _languageTemp;
-                [appDelegate onImputMethodChanged:NO];
-                startNewSession();
-            } else {
-                saveSmartSwitchKeyData();
-            }
-        }
-        if (vRememberCode && (_languageTemp >> 1) != vCodeTable) { //for remember table code feature
-            if (_languageTemp != -1) {
-                [appDelegate onCodeTableChanged:(_languageTemp >> 1)];
-            } else {
-                saveSmartSwitchKeyData();
-            }
-        }
-    }
-    
     void OnTableCodeChange() {
+        ENGINE_LOCK;
         onTableCodeChange();
         if (vRememberCode) {
-            queryFrontMostApp();
-            setAppInputMethodStatus(string(_frontMostApp.UTF8String), vLanguage | (vCodeTable << 1));
-            saveSmartSwitchKeyData();
+            RememberAppMode();
         }
     }
     
     void OnInputMethodChanged() {
+        ENGINE_LOCK;
         if (vUseSmartSwitchKey) {
-            queryFrontMostApp();
-            setAppInputMethodStatus(string(_frontMostApp.UTF8String), vLanguage | (vCodeTable << 1));
-            saveSmartSwitchKeyData();
+            RememberAppMode();
         }
     }
     
     void OnSpellCheckingChanged() {
+        ENGINE_LOCK;
         vSetCheckSpelling();
     }
     
@@ -622,14 +811,22 @@ extern "C" {
     }
     
     void switchLanguage() {
+        //the hotkey may be pressed in a panel which has just opened: apply its remembered mode first
+        getTargetApp();
         if (vLanguage == 0)
             vLanguage = 1;
         else
             vLanguage = 0;
-        if (HAS_BEEP(vSwitchKeyStatus))
-            NSBeep();
-        [appDelegate onImputMethodChanged:YES];
         startNewSession();
+        if (vUseSmartSwitchKey)
+            RememberAppMode();
+        SaveModeAndRefreshMenu();
+        if (HAS_BEEP(vSwitchKeyStatus)) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+            NSBeep();
+            });
+        }
+        VKLog(@"mode", @"%@ by hotkey", vLanguage ? @"Vietnamese" : @"English");
     }
     
     void handleMacro() {
@@ -676,21 +873,34 @@ extern "C" {
     }
 
     // If conversion fails, return fallbackKeyCode
+    // Like NSEvent.charactersIgnoringModifiers (only Shift counts), with the keyboard layout saved by UpdateInputSourceLanguage():
+    // asking macOS for the layout must happen on the main thread
     CGKeyCode ConvertEventToKeyboadLayoutCompatKeyCode(CGEventRef keyEvent, CGKeyCode fallbackKeyCode) {
-        NSEvent *kbLayoutCompatEvent = [NSEvent eventWithCGEvent:keyEvent];
-        NSString *kbLayoutCompatKeyString = kbLayoutCompatEvent.charactersIgnoringModifiers;
-        return ConvertKeyStringToKeyCode(kbLayoutCompatKeyString,
-                                         fallbackKeyCode);
+        if (_keyboardLayout == NULL)
+            return fallbackKeyCode;
+        UInt32 modifiers = (CGEventGetFlags(keyEvent) & kCGEventFlagMaskShift) ? (shiftKey >> 8) & 0xFF : 0;
+        UInt32 deadKeyState = 0;
+        UniChar chars[4];
+        UniCharCount length = 0;
+        if (UCKeyTranslate((const UCKeyboardLayout*)CFDataGetBytePtr(_keyboardLayout), fallbackKeyCode, kUCKeyActionDown, modifiers,
+                           _keyboardType, kUCKeyTranslateNoDeadKeysMask, &deadKeyState, 4, &length, chars) != noErr || length == 0)
+            return fallbackKeyCode;
+        return ConvertKeyStringToKeyCode([NSString stringWithCharacters:chars length:length], fallbackKeyCode);
     }
+    
+    static CGEventRef HandleEvent(CGEventTapProxy proxy, CGEventType type, CGEventRef event);
 
     /**
      * MAIN HOOK entry, very important function.
-     * MAIN Callback.
+     * MAIN Callback. It runs on the keyboard thread, see OpenKeyManager
      */
     CGEventRef OpenKeyCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
         //macOS turns off the tap when the callback is too slow, turn it on again
         if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
             [OpenKeyManager reEnableEventTap];
+            int count = ++_tapRestartCount;
+            VKLog(@"tap", @"macOS turned off the event tap (%@), turned it on again (%d times)",
+                  type == kCGEventTapDisabledByTimeout ? @"too slow" : @"user input", count);
             return event;
         }
         
@@ -699,6 +909,21 @@ extern "C" {
             return event;
         }
         
+        //the time includes waiting for the lock: it is how long the key waits
+        uint64_t start = mach_absolute_time();
+        ENGINE_LOCK;
+        CGEventRef result = HandleEvent(proxy, type, event);
+        uint64_t time = mach_absolute_time() - start;
+        _eventCount++;
+        _eventTotalTime += time;
+        if (time > _eventMaxTime)
+            _eventMaxTime = time;
+        if (MachToMicroseconds(time) > SLOW_EVENT_LOG)
+            VKLog(@"tap", @"slow event handling: %.1f ms", MachToMicroseconds(time) / 1000);
+        return result;
+    }
+    
+    static CGEventRef HandleEvent(CGEventTapProxy proxy, CGEventType type, CGEventRef event) {
         _flag = CGEventGetFlags(event);
         _keycode = (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
         
@@ -711,6 +936,7 @@ extern "C" {
         if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown ||
             (type == kCGEventKeyDown && (OTHER_CONTROL_KEY || _keycode == KEY_ESC || _keycode == KEY_RETURN || _keycode == KEY_ENTER))) {
             InvalidateTargetApp();
+            CheckTypingAppSoon();
         }
         
         //switch language shortcut; convert hotkey
@@ -773,8 +999,13 @@ extern "C" {
         
         _proxy = proxy;
         
-        //If is in english mode, or the app always uses English (but not Spotlight opened over it)
-        if (vLanguage == 0 || (_isExcludedAppActive && ![getTargetApp() isEqualToString:@"com.apple.Spotlight"])) {
+        //the app which receives the keys: it can be a panel over the frontmost app (Spotlight, Alfred,...).
+        //When it changes, its remembered mode is applied
+        if (type == kCGEventKeyDown)
+            getTargetApp();
+        
+        //If is in english mode, or the app always uses English
+        if (vLanguage == 0 || _isExcludedAppActive) {
             if (vUseMacro && vUseMacroInEnglishMode && type == kCGEventKeyDown) {
                 vEnglishMode((type == kCGEventKeyDown ? vKeyEventState::KeyDown : vKeyEventState::MouseDown),
                              _keycode,
@@ -875,3 +1106,45 @@ extern "C" {
         return event;
     }
 }
+
+#pragma mark - Diagnostics
+
+@interface VKEngineStatus ()
+@property (nonatomic, readwrite) BOOL tapRunning;
+@property (nonatomic, readwrite) BOOL tapEnabled;
+@property (nonatomic, readwrite) NSInteger tapRestartCount;
+@property (nonatomic, readwrite) NSInteger eventCount;
+@property (nonatomic, readwrite) double averageEventMicroseconds;
+@property (nonatomic, readwrite) double maxEventMicroseconds;
+@property (nonatomic, readwrite) double detectMicroseconds;
+@property (nonatomic, readwrite) NSInteger detectMethod;
+@property (nonatomic, readwrite) BOOL accessibilityAnswered;
+@property (nonatomic, readwrite, copy) NSString* frontApp;
+@property (nonatomic, readwrite, copy) NSString* typingApp;
+@property (nonatomic, readwrite) BOOL typingAppExcluded;
+@property (nonatomic, readwrite, copy) NSString* inputSource;
+@property (nonatomic, readwrite) BOOL englishInputSource;
+@end
+
+@implementation VKEngineStatus
+//"::": the properties have ivars with the same names as the globals
++(VKEngineStatus*)current {
+    VKEngineStatus* status = [[VKEngineStatus alloc] init];
+    status.tapRunning = [OpenKeyManager isInited];
+    status.tapEnabled = [OpenKeyManager isEventTapEnabled];
+    status.tapRestartCount = ::_tapRestartCount;
+    ENGINE_LOCK;
+    status.eventCount = (NSInteger)::_eventCount;
+    status.averageEventMicroseconds = ::_eventCount > 0 ? MachToMicroseconds(::_eventTotalTime) / ::_eventCount : 0;
+    status.maxEventMicroseconds = MachToMicroseconds(::_eventMaxTime);
+    status.detectMicroseconds = ::_detectTime;
+    status.detectMethod = ::_detectMethod;
+    status.accessibilityAnswered = ::_accessibilityAnswered;
+    status.frontApp = ::_frontApp;
+    status.typingApp = ::_typingApp;
+    status.typingAppExcluded = ::_isExcludedAppActive;
+    status.inputSource = ::_inputSource;
+    status.englishInputSource = ::_isEnglishInputSource;
+    return status;
+}
+@end

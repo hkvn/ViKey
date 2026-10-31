@@ -27,6 +27,7 @@ void ReloadExcludedApps(void) {}
 -(void)onInputTypeSelectedIndex:(int)index {}
 -(void)onCodeTableChanged:(int)index {}
 -(void)onMacroSelected {}
+-(void)onDiagnosticsSelected {}
 -(void)loadDefaultConfig {}
 -(void)setQuickConvertString {}
 -(void)updateStatusIcon {}

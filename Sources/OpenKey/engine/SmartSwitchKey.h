@@ -31,6 +31,11 @@ void getSmartSwitchKeySaveData(vector<Byte>& outData);
 int getAppInputMethodStatus(const string& bundleId, const int& currentInputMethod);
 
 /**
+ * saved status of this @bundleId, -1 if there is none. Unlike getAppInputMethodStatus, the app is not added
+ */
+int findAppInputMethodStatus(const string& bundleId);
+
+/**
  * Set default language for this @bundleId
  */
 void setAppInputMethodStatus(const string& bundleId, const int& language);

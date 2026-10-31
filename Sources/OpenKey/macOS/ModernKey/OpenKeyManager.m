@@ -7,6 +7,7 @@
 //
 
 #import "OpenKeyManager.h"
+#import "Logging.h"
 
 extern void OpenKeyInit(void);
 
@@ -29,9 +30,14 @@ static BOOL _isInited = NO;
 static CFMachPortRef      eventTap;
 static CGEventMask        eventMask;
 static CFRunLoopSourceRef runLoopSource;
+static CFRunLoopRef       tapRunLoop;
 
 +(BOOL)isInited {
     return _isInited;
+}
+
++(BOOL)isEventTapEnabled {
+    return _isInited && CGEventTapIsEnabled(eventTap);
 }
 
 +(BOOL)initEventTap {
@@ -57,8 +63,7 @@ static CFRunLoopSourceRef runLoopSource;
                                 NULL);
     
     if (!eventTap) {
-        
-        fprintf(stderr, "failed to create event tap\n");
+        VKLog(@"tap", @"can not create the event tap (Accessibility permission: %@)", AXIsProcessTrusted() ? @"yes" : @"no");
         return NO;
     }
     
@@ -67,30 +72,63 @@ static CFRunLoopSourceRef runLoopSource;
     // Create a run loop source.
     runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0);
     
-    // Add to the current run loop.
-    CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-    
-    // Enable the event tap.
-    CGEventTapEnable(eventTap, true);
+    // Read the keys on a thread of their own: when the main thread is busy (a window opens, an alert is shown,...)
+    // typing does not wait, and macOS does not turn the tap off because it answers too slowly
+    dispatch_semaphore_t started = dispatch_semaphore_create(0);
+    CFRunLoopSourceRef source = runLoopSource;
+    CFMachPortRef tap = eventTap;
+    NSThread* thread = [[NSThread alloc] initWithBlock:^{
+        tapRunLoop = (CFRunLoopRef)CFRetain(CFRunLoopGetCurrent());
+        CFRunLoopAddSource(tapRunLoop, source, kCFRunLoopCommonModes);
+        CGEventTapEnable(tap, true);
+        dispatch_semaphore_signal(started);
+        //until stopEventTap removes the tap
+        CFRunLoopRun();
+    }];
+    thread.name = @"ViKey keyboard";
+    thread.qualityOfService = NSQualityOfServiceUserInteractive;
+    [thread start];
+    dispatch_semaphore_wait(started, DISPATCH_TIME_FOREVER);
+    VKLog(@"tap", @"event tap started");
     
     return YES;
 }
 
+//never call it while holding the engine lock: it waits for the keyboard thread
 +(BOOL)stopEventTap {
     if (_isInited) { //release all object
-        CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-        CFRelease(runLoopSource);
+        //remove the tap on its own thread, between two events
+        dispatch_semaphore_t stopped = dispatch_semaphore_create(0);
+        CFRunLoopRef runLoop = tapRunLoop;
+        CFRunLoopSourceRef source = runLoopSource;
+        CFMachPortRef tap = eventTap;
+        CFRunLoopPerformBlock(runLoop, kCFRunLoopCommonModes, ^{
+            CGEventTapEnable(tap, false);
+            CFRunLoopRemoveSource(runLoop, source, kCFRunLoopCommonModes);
+            CFMachPortInvalidate(tap);
+            CFRunLoopStop(runLoop);
+            dispatch_semaphore_signal(stopped);
+        });
+        CFRunLoopWakeUp(runLoop);
+        if (dispatch_semaphore_wait(stopped, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0) {
+            CFRelease(source);
+            CFRelease(tap);
+            CFRelease(runLoop);
+            VKLog(@"tap", @"event tap stopped");
+        } else {
+            //the keyboard thread may still use them: keep them
+            VKLog(@"tap", @"the keyboard thread did not stop in time");
+        }
         runLoopSource = nil;
-        
-        CFMachPortInvalidate(eventTap);
-        CFRelease(eventTap);
         eventTap = nil;
+        tapRunLoop = nil;
         
         _isInited = false;
     }
     return YES;
 }
 
+//called on the keyboard thread
 +(void)reEnableEventTap {
     if (_isInited)
         CGEventTapEnable(eventTap, true);
@@ -174,12 +212,15 @@ static CFRunLoopSourceRef runLoopSource;
                 callback();
             }
             if (latestVersion == nil) {
+                VKLog(@"update", @"update check failed (HTTP %ld, %@)", (long)((NSHTTPURLResponse *)response).statusCode,
+                      error.localizedDescription ?: @"no error");
                 if (callback != nil)
                     [self showMessage:parent message:@"Không kiểm tra được bản mới!" subMsg:@"Không kết nối được GitHub, hoặc chưa có bản phát hành nào. Hãy thử lại sau."];
                 return;
             }
             NSString* currentVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
             BOOL needUpdating = [latestVersion compare:currentVersion options:NSNumericSearch] == NSOrderedDescending;
+            VKLog(@"update", @"latest version %@, current %@", latestVersion, currentVersion);
             if (needUpdating || callback != nil) {
                 [self showUpdateMessage:parent needUpdating:needUpdating newVersion:latestVersion currentVersion:currentVersion pageURL:pageURL];
             }

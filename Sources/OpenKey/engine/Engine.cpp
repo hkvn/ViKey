@@ -517,6 +517,11 @@ void restoreLastTypingState() {
     }
 }
 
+std::recursive_mutex& engineMutex() {
+    static std::recursive_mutex mutex;
+    return mutex;
+}
+
 void startNewSession() {
     _index = 0;
     hBPC = 0;

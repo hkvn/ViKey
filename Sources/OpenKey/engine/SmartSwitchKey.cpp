@@ -66,6 +66,11 @@ int getAppInputMethodStatus(const string& bundleId, const int& currentInputMetho
     return -1;
 }
 
+int findAppInputMethodStatus(const string& bundleId) {
+    map<string, Int8>::iterator it = _smartSwitchKeyData.find(bundleId);
+    return it != _smartSwitchKeyData.end() ? it->second : -1;
+}
+
 void setAppInputMethodStatus(const string& bundleId, const int& language) {
     _smartSwitchKeyData[bundleId] = language;
     _cacheKey = bundleId;

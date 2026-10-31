@@ -105,6 +105,7 @@ struct SpellingSettingsView: View {
 //MARK: - Gõ tắt
 struct MacroSettingsView: View {
     @ObservedObject var model: SettingsModel
+    @ObservedObject var sync = MacroSync.shared
 
     var body: some View {
         Form {
@@ -118,6 +119,28 @@ struct MacroSettingsView: View {
                 LabeledContent("Danh sách từ gõ tắt") {
                     Button("Bảng gõ tắt…") { model.openMacroTable() }
                 }
+            }
+
+            Section {
+                OptionToggle(title: "Đồng bộ gõ tắt giữa các máy Mac",
+                             help: sync.status.isEmpty ? nil : sync.status,
+                             isOn: Binding(get: { sync.isEnabled }, set: { sync.setEnabled($0) }))
+                LabeledContent("Thư mục") {
+                    HStack {
+                        Text(sync.folderDisplayName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundColor(.secondary)
+                        Button("Đổi…") { sync.chooseFolder() }
+                    }
+                }
+            } header: {
+                Text("Đồng bộ")
+            } footer: {
+                Text("Danh sách gõ tắt được lưu trong file \"\(MacroSync.fileName)\" ở thư mục này, mặc định trong iCloud Drive. "
+                     + "Các máy Mac bật đồng bộ cùng một thư mục sẽ dùng chung danh sách.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Section("Gõ nhanh") {
@@ -326,6 +349,9 @@ struct AboutSettingsView: View {
                 }
                 LabeledContent("Bản phát hành") {
                     Link("Các phiên bản", destination: URL(string: "https://github.com/hkvn/ViKey/releases")!)
+                }
+                LabeledContent("Gõ không được?") {
+                    Button("Chẩn đoán…") { appDelegate?.onDiagnosticsSelected() }
                 }
             }
 
