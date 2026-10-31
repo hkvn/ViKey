@@ -9,15 +9,16 @@ import AppKit
 import SwiftUI
 
 extension NSWindowController {
-    /// ViKey is a menu bar app: bring it to the front so the window is not behind other apps
+    /// ViKey is a menu bar app: bring it to the front so the window is not behind other apps.
+    /// On macOS 14+ the system may ignore NSApp.activate() when it is called from the menu bar menu
+    /// (cooperative activation, FB13212424): the window then opens behind the frontmost app.
+    /// The old call still activates the app, and orderFrontRegardless shows the window even if it does not
     func showInFront() {
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        window?.collectionBehavior.insert(.moveToActiveSpace)
         showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
 }
 
