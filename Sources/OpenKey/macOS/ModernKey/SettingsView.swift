@@ -68,7 +68,7 @@ struct TypingSettingsView: View {
                     .toggleStyle(.button)
                 }
                 OptionToggle(title: "Kêu beep khi chuyển", isOn: model.switchKeyBinding(.beep))
-                OptionToggle(title: "Tạm tắt OpenKey bằng phím ⌘", isOn: model.binding(.tempOffOpenKey))
+                OptionToggle(title: "Tạm tắt ViKey bằng phím ⌘", isOn: model.binding(.tempOffOpenKey))
             }
 
             Section("Theo từng ứng dụng") {
@@ -173,7 +173,7 @@ struct SystemSettingsView: View {
                 HStack {
                     Button("Khôi phục mặc định…") { confirmDefaultConfig = true }
                     Spacer()
-                    Button("Thoát OpenKey") { NSApp.terminate(nil) }
+                    Button("Thoát ViKey") { NSApp.terminate(nil) }
                 }
             }
         }
@@ -207,8 +207,8 @@ struct AboutSettingsView: View {
                     Image(nsImage: NSApp.applicationIconImage)
                         .resizable()
                         .frame(width: 96, height: 96)
-                    Text("OpenKey").font(.title).bold()
-                    Text("Bộ gõ Tiếng Việt nguồn mở đa nền tảng").foregroundColor(.secondary)
+                    Text("ViKey").font(.title).bold()
+                    Text("Bộ gõ Tiếng Việt nguồn mở cho macOS").foregroundColor(.secondary)
                     Text(version).font(.caption).foregroundColor(.secondary)
                     Button(checkingUpdate ? "Đang kiểm tra…" : "Kiểm tra bản mới…") {
                         checkingUpdate = true
@@ -224,18 +224,27 @@ struct AboutSettingsView: View {
             }
 
             Section {
-                LabeledContent("Trang chủ") {
-                    Link("open-key.org", destination: URL(string: "https://open-key.org")!)
-                }
                 LabeledContent("Mã nguồn") {
+                    Link("github.com/hkvn/ViKey", destination: URL(string: "https://github.com/hkvn/ViKey")!)
+                }
+                LabeledContent("Bản phát hành") {
+                    Link("Các phiên bản", destination: URL(string: "https://github.com/hkvn/ViKey/releases")!)
+                }
+            }
+
+            Section {
+                LabeledContent("OpenKey") {
                     Link("github.com/tuyenvm/OpenKey", destination: URL(string: "https://github.com/tuyenvm/OpenKey")!)
                 }
-                LabeledContent("Facebook") {
-                    Link("OpenKeyVN", destination: URL(string: "https://www.facebook.com/OpenKeyVN")!)
-                }
-                LabeledContent("Tác giả") {
+                LabeledContent("Tác giả OpenKey") {
                     Link("Mai Vũ Tuyên", destination: URL(string: "mailto:maivutuyen.91@gmail.com")!)
                 }
+            } header: {
+                Text("Dựa trên OpenKey")
+            } footer: {
+                Text("ViKey phát triển tiếp từ OpenKey, theo giấy phép GPL-3.0.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .formStyle(.grouped)

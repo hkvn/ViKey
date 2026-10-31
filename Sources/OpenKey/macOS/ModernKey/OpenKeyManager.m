@@ -151,105 +151,66 @@ static CFRunLoopSourceRef runLoopSource;
 
 #pragma mark -AutoUpdate feature
 
+#define RELEASES_PAGE @"https://github.com/hkvn/ViKey/releases/latest"
+
+//callback is nil when checking on startup: then only a newer version is shown
 +(void)checkNewVersion:(NSWindow*)parent callbackFunc:(CheckNewVersionCallback) callback {
-    //load new version config
-    NSURLSession *aSession = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
-    [[aSession dataTaskWithURL:[NSURL URLWithString:@"https://raw.githubusercontent.com/tuyenvm/OpenKey/master/version.json"] completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (((NSHTTPURLResponse *)response).statusCode == 200) {
-            if (data) {
-                if(NSClassFromString(@"NSJSONSerialization")) {
-                    NSError *error = nil;
-                    id object = [NSJSONSerialization
-                                 JSONObjectWithData:data
-                                 options:0
-                                 error:&error];
-                    
-                    if(error) {  }
-                    if([object isKindOfClass:[NSDictionary class]]) {
-                        NSDictionary *results = object;
-                        NSDictionary *ver = [results valueForKey:@"latestVersion"];
-                        NSString* versionCodeString = [ver valueForKey:@"versionCode"];
-                        int versionCode = (int)[versionCodeString integerValue];
-                        int currentVersionCode = (int)[((NSString*)[[NSBundle mainBundle] objectForInfoDictionaryKey: @"CFBundleVersion"]) integerValue];
-                        
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            if (callback != nil) {
-                                callback();
-                            }
-                            if (versionCode > currentVersionCode || callback != nil) {
-                                [self showUpdateMessage:parent needUpdating:versionCode > currentVersionCode newVersion:[ver valueForKey:@"versionName"]];
-                            }
-                        });
-                    }
-                    else {
-                        //oh my god
-                    }
-                }
-                else {
-                    //can not parse json
-                }
-            }
+    //latest published release on GitHub (drafts and pre-releases are not included)
+    NSMutableURLRequest* request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.github.com/repos/hkvn/ViKey/releases/latest"]];
+    [request setValue:@"application/vnd.github+json" forHTTPHeaderField:@"Accept"];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSDictionary* release = nil;
+        if (((NSHTTPURLResponse *)response).statusCode == 200 && data) {
+            id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            if ([object isKindOfClass:[NSDictionary class]])
+                release = object;
         }
+        NSString* latestVersion = [release[@"tag_name"] isKindOfClass:[NSString class]] ? release[@"tag_name"] : nil;
+        if ([latestVersion hasPrefix:@"v"])
+            latestVersion = [latestVersion substringFromIndex:1];
+        NSString* pageURL = [release[@"html_url"] isKindOfClass:[NSString class]] ? release[@"html_url"] : RELEASES_PAGE;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (callback != nil) {
+                callback();
+            }
+            if (latestVersion == nil) {
+                if (callback != nil)
+                    [self showMessage:parent message:@"Không kiểm tra được bản mới!" subMsg:@"Không kết nối được GitHub, hoặc chưa có bản phát hành nào. Hãy thử lại sau."];
+                return;
+            }
+            NSString* currentVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+            BOOL needUpdating = [latestVersion compare:currentVersion options:NSNumericSearch] == NSOrderedDescending;
+            if (needUpdating || callback != nil) {
+                [self showUpdateMessage:parent needUpdating:needUpdating newVersion:latestVersion currentVersion:currentVersion pageURL:pageURL];
+            }
+        });
     }] resume];
 }
 
-+(void)showUpdateMessage:(NSWindow*)parent needUpdating:(BOOL)needUpdating newVersion:(NSString*)versionString {
++(void)showUpdateMessage:(NSWindow*)parent needUpdating:(BOOL)needUpdating newVersion:(NSString*)versionString
+          currentVersion:(NSString*)currentVersion pageURL:(NSString*)pageURL {
     NSAlert *alert = [[NSAlert alloc] init];
-    [alert setMessageText:(needUpdating ? [NSString stringWithFormat:@"OpenKey Có phiên bản mới (%@), bạn có muốn cập nhật không?", versionString] : @"Bạn đang dùng phiên bản mới nhất!")];
-    [alert setInformativeText:(needUpdating ? @"Bấm 'Có' để cập nhật OpenKey." : @"")];
-    
+    [alert setMessageText:(needUpdating ? [NSString stringWithFormat:@"ViKey có phiên bản mới (%@)", versionString] : @"Bạn đang dùng phiên bản mới nhất!")];
+    [alert setInformativeText:(needUpdating ? [NSString stringWithFormat:@"Bạn đang dùng phiên bản %@. Bấm 'Tải về' để mở trang tải bản mới.", currentVersion] : @"")];
+
     if (!needUpdating) {
         [alert addButtonWithTitle:@"OK"];
     } else {
-        [alert addButtonWithTitle:@"Có"];
-        [alert addButtonWithTitle:@"Không"];
+        [alert addButtonWithTitle:@"Tải về"];
+        [alert addButtonWithTitle:@"Để sau"];
     }
+    void (^handler)(NSModalResponse) = ^(NSModalResponse returnCode) {
+        if (returnCode == NSAlertFirstButtonReturn && needUpdating) {
+            [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:pageURL]];
+        }
+    };
     if (parent == nil) {
         [alert.window makeKeyAndOrderFront:nil];
         [alert.window setLevel:NSStatusWindowLevel];
-        NSModalResponse res = [alert runModal];
-        if (res == 1000 && needUpdating) {
-            [self launchUpdateHelper];
-        }
+        handler([alert runModal]);
     } else {
-        [alert beginSheetModalForWindow:parent completionHandler:^(NSModalResponse returnCode) {
-            if (returnCode == 1000 && needUpdating) {
-                [self launchUpdateHelper];
-            }
-        }];
+        [alert beginSheetModalForWindow:parent completionHandler:handler];
     }
-}
-
-+(void)launchUpdateHelper {
-    //check update app has exist or not
-    NSError *copyError = nil;
-    NSString* target = [NSString stringWithFormat:@"%@/OpenKeyUpdate.app", [self getApplicationSupportFolder]];
-    [[NSFileManager defaultManager] removeItemAtPath:target error:&copyError];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:target]) {
-        [[NSFileManager defaultManager] createDirectoryAtPath:[self getApplicationSupportFolder] withIntermediateDirectories:YES attributes:nil error:nil];
-        
-        if (![[NSFileManager defaultManager] copyItemAtPath:[self getUpdateBundlePath] toPath:target error:&copyError]) {
-            NSLog(@"Error on copy");
-        }
-    }
-    
-    NSWorkspace *workspace = [NSWorkspace sharedWorkspace];
-    NSURL *url = [NSURL fileURLWithPath:[workspace fullPathForApplication:target]];
-    NSError *error = nil;
-    NSArray *arguments = [NSArray arrayWithObjects: @"yeah", nil];
-    [workspace launchApplicationAtURL:url options:0 configuration:[NSDictionary dictionaryWithObject:arguments forKey:NSWorkspaceLaunchConfigurationArguments] error:&error];
-    
-    [NSApp terminate:0]; //exit main app
-}
-
-+(NSString*)getApplicationSupportFolder {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
-    NSString *applicationSupportDirectory = [paths firstObject];
-    return [NSString stringWithFormat:@"%@/OpenKey", applicationSupportDirectory];
-}
-
-+(NSString*)getUpdateBundlePath {
-    NSString *currentpath = [[NSBundle mainBundle] bundlePath];
-    return [NSString stringWithFormat:@"%@/Contents/Library/LoginItems/OpenKeyUpdate.app", currentpath];
 }
 @end

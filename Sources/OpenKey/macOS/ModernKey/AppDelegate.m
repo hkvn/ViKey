@@ -17,7 +17,7 @@
 #import "ViewController.h"
 #import "OpenKeyManager.h"
 #import "MJAccessibilityUtils.h"
-#import "OpenKey-Swift.h"
+#import "ViKey-Swift.h"
 
 AppDelegate* appDelegate;
 extern ViewController* viewController;
@@ -64,6 +64,9 @@ extern bool convertToolDontAlertWhenCompleted;
 
 #define SECURE_INPUT_NOTIFY_DELAY 10 //seconds; short password typing should not show a notification
 #define SECURE_INPUT_NOTIFICATION @"SecureInput"
+
+//ViKey was OpenKey, which used this bundle id
+#define OPENKEY_LEGACY_BUNDLE @"com.tuyenmai.openkey"
 
 @interface AppDelegate () <UNUserNotificationCenterDelegate>
 
@@ -114,7 +117,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
 -(void)askPermission {
     NSAlert *alert = [[NSAlert alloc] init];
-    [alert setMessageText: [NSString stringWithFormat:@"OpenKey cần bạn cấp quyền để có thể hoạt động!"]];
+    [alert setMessageText: [NSString stringWithFormat:@"ViKey cần bạn cấp quyền để có thể hoạt động!"]];
     [alert setInformativeText:@"Vui lòng chạy lại ứng dụng sau khi cấp quyền."];
 
     [alert addButtonWithTitle:@"Không"];
@@ -132,8 +135,39 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
     [NSApp terminate:0];
 }
 
+//on the first launch, copy the settings of OpenKey (macros, hotkey, options,...)
+-(void)importOpenKeySettings {
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    if ([defaults objectForKey:@"NonFirstTime"] != nil || [defaults boolForKey:@"ImportedOpenKeySettings"])
+        return;
+    NSDictionary* openKeySettings = [defaults persistentDomainForName:OPENKEY_LEGACY_BUNDLE];
+    for (NSString* key in openKeySettings) {
+        [defaults setObject:openKeySettings[key] forKey:key];
+    }
+    [defaults setBool:YES forKey:@"ImportedOpenKeySettings"];
+}
+
+//ViKey and OpenKey running together would both change the keys
+-(void)askToQuitOpenKey {
+    NSArray<NSRunningApplication*>* apps = [NSRunningApplication runningApplicationsWithBundleIdentifier:OPENKEY_LEGACY_BUNDLE];
+    if (apps.count == 0)
+        return;
+    NSAlert *alert = [[NSAlert alloc] init];
+    [alert setMessageText:@"OpenKey đang chạy"];
+    [alert setInformativeText:@"ViKey và OpenKey chạy cùng lúc sẽ gõ sai. Bạn nên thoát OpenKey."];
+    [alert addButtonWithTitle:@"Thoát OpenKey"];
+    [alert addButtonWithTitle:@"Để sau"];
+    [alert.window makeKeyAndOrderFront:nil];
+    [alert.window setLevel:NSStatusWindowLevel];
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
+        for (NSRunningApplication* app in apps)
+            [app terminate];
+    }
+}
+
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     appDelegate = self;
+    [self importOpenKeySettings];
     
     [self registerSupportedNotification];
     
@@ -169,6 +203,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         [self askPermission];
         return;
     }
+    [self askToQuitOpenKey];
     
     vShowIconOnDock = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"vShowIconOnDock"];
     if (vShowIconOnDock)
@@ -360,7 +395,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
         [service unregisterAndReturnError:&error];
     }
     if (error)
-        NSLog(@"OpenKey: can not change login item: %@", error);
+        NSLog(@"ViKey: can not change login item: %@", error);
 }
 
 -(void)setGrayIcon:(BOOL)val {
@@ -643,7 +678,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
             if (!granted)
                 return;
             UNMutableNotificationContent* content = [[UNMutableNotificationContent alloc] init];
-            content.title = @"OpenKey không gõ được tiếng Việt";
+            content.title = @"ViKey không gõ được tiếng Việt";
             content.body = appName ? [NSString stringWithFormat:@"%@ đang bật Secure Input. Bấm để xem cách khắc phục.", appName]
                                    : @"Secure Input đang bật. Bấm để xem cách khắc phục.";
             UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:SECURE_INPUT_NOTIFICATION content:content trigger:nil];
@@ -660,7 +695,7 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
     NSAlert *alert = [[NSAlert alloc] init];
     [alert setMessageText:appName ? [NSString stringWithFormat:@"%@ đang bật Secure Input", appName] : @"Secure Input đang bật"];
-    [alert setInformativeText:@"Khi Secure Input bật, macOS không gửi phím cho bộ gõ, nên OpenKey tạm thời không gõ được tiếng Việt. "
+    [alert setInformativeText:@"Khi Secure Input bật, macOS không gửi phím cho bộ gõ, nên ViKey tạm thời không gõ được tiếng Việt. "
                               @"Đây là tính năng bảo mật của macOS, thường bật khi bạn nhập mật khẩu.\n\n"
                               @"Cách khắc phục:\n"
                               @"• Rời khỏi ô mật khẩu, hoặc chuyển sang ứng dụng khác.\n"

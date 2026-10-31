@@ -1,24 +1,60 @@
-## Cách build cho macOS:
-Vì một số lý do mà OpenKey không thể đưa lêp Mac App Store được, nếu các bạn không yên tâm về file build chính thức từ tác giả, các bạn có thể tải mã nguồn về tự build lấy OpenKey cho mình. 
+## Build ViKey cho macOS
 
 Yêu cầu:
-- macOS Mojave trở lên.
-- XCode 10 trở lên.
+- macOS 13 trở lên.
+- Xcode 15 trở lên (đã thử với Xcode 26).
+- Một chứng chỉ ký mã trong Keychain: "Apple Development" (tạo miễn phí trong Xcode → Settings → Accounts) hoặc "Developer ID Application".
 
-Tải mã nguồn từ dự án OpenKey trên GitHub về, mở dự án OpenKey bằng cách vào:
-<img width="808" alt="Screen Shot 2022-06-01 at 13 34 39" src="https://user-images.githubusercontent.com/7700801/171342552-46c391a7-9160-4677-bb8a-9d8cececcfe6.png">
+Dự án Xcode: `Sources/OpenKey/macOS/OpenKey.xcodeproj`, scheme `OpenKey`, sản phẩm là `ViKey.app`.
 
-Dự án OpenKey sẽ hiện ra:
-<img width="1522" alt="Screen Shot 2022-06-01 at 13 37 36" src="https://user-images.githubusercontent.com/7700801/171343050-aa2f9629-4670-4c1e-a3c0-0c25acefa42d.png">
+### Build bằng dòng lệnh
 
-Giờ bạn vào menu Product -> Archive để Xcode tiến hành build OpenKey ở dạng Production (có thể dùng được), sau khi build xong hộp thoại sẽ xuất hiện, bấm vào Distribute App
-<img width="1112" alt="Screen Shot 2022-06-01 at 13 45 50" src="https://user-images.githubusercontent.com/7700801/171344111-540b66cb-556f-48cf-ad3b-0f44ab208d1a.png">
+```sh
+cd Sources/OpenKey/macOS
+xcodebuild -project OpenKey.xcodeproj -scheme OpenKey -configuration Release \
+  CODE_SIGN_IDENTITY="Apple Development: you@example.com (XXXXXXXXXX)" \
+  CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=<TEAM_ID> PROVISIONING_PROFILE_SPECIFIER="" \
+  build
+```
 
-Nó sẽ ra:
-<img width="1112" alt="Screen Shot 2022-06-01 at 13 48 53" src="https://user-images.githubusercontent.com/7700801/171344529-12eed723-4e66-4818-8502-fa693b269dba.png">
+`TEAM_ID` là giá trị `OU` của chứng chỉ:
 
-Bấm Next để chọn nơi lưu trữ file Build. Vậy là xong, bạn đã có ứng dụng OpenKey.app của riêng bạn.
+```sh
+security find-certificate -c "Apple Development" -p | openssl x509 -noout -subject
+```
 
-Lưu ý: trong quá trình build, nếu XCode bão lỗi `invalid in C99`, khả năng cao là ở trong file `MJAccessibilityUtils.m`, dòng 26 `isEnabled = AXAPIEnabled();`, bạn lên đầu file thêm khai báo `extern BOOL AXAPIEnabled();` là sẽ build được.
+Nếu build trong Xcode, hãy chọn team của bạn trong *Signing & Capabilities*.
 
-Chúc các bạn Build OpenKey cho macOS thành công!
+### Vì sao nên ký bằng chứng chỉ thật
+
+macOS ghi nhớ quyền Accessibility theo chữ ký của ứng dụng. Nếu ký ad-hoc (`CODE_SIGN_IDENTITY="-"`), mỗi bản build có chữ ký khác nhau, nên phải cấp quyền lại sau mỗi lần build. Ký bằng cùng một chứng chỉ thì quyền được giữ khi build lại hoặc cập nhật.
+
+## Tạo bản phát hành trên GitHub
+
+Script `scripts/release-macos.sh` làm toàn bộ việc phát hành trên máy Mac của bạn, chứng chỉ không rời khỏi máy:
+
+```sh
+scripts/release-macos.sh 2.1.0 --dry-run   # chỉ build và đóng gói, để kiểm tra
+scripts/release-macos.sh 2.1.0             # phát hành thật
+```
+
+Tuỳ chọn:
+- `--draft`: tạo bản nháp trên GitHub. Người dùng và chức năng kiểm tra bản mới chưa thấy bản này cho đến khi bạn bấm Publish.
+- `--notes FILE`: dùng nội dung FILE làm ghi chú phát hành (mặc định: danh sách commit từ bản phát hành trước).
+- `--yes`: không hỏi lại trước khi phát hành.
+- Biến môi trường `VIKEY_SIGN_IDENTITY`: chọn chứng chỉ khác (mặc định: "Developer ID Application" nếu có, nếu không thì "Apple Development").
+
+Script sẽ:
+1. Kiểm tra: `gh` đã đăng nhập, không có thay đổi chưa commit, tag `v<version>` chưa tồn tại.
+2. Build `ViKey.app` với phiên bản mới và số build tăng thêm 1, ký bằng chứng chỉ của bạn.
+3. Đóng gói `ViKey-<version>.dmg`, `ViKey-<version>.zip` và `SHA256SUMS.txt` vào `build/release/<version>/`.
+4. Hỏi lại, rồi commit phiên bản mới ("Release ViKey <version>"), tạo tag `v<version>`, push nhánh hiện tại và tag lên `origin`.
+5. Tạo GitHub release với các file trên và ghi chú cài đặt.
+
+Chức năng kiểm tra bản mới trong ViKey đọc bản phát hành mới nhất của `hkvn/ViKey` (bỏ qua bản nháp), so sánh với phiên bản đang chạy, rồi mở trang tải về nếu có bản mới.
+
+Quy trình gợi ý: làm việc trên nhánh `dev`, merge vào `master`, rồi chạy script trên `master`.
+
+### Lưu ý về Gatekeeper
+
+Bản phát hành được ký bằng chứng chỉ "Apple Development" nhưng chưa được Apple notarize, nên lần đầu mở, người dùng phải vào *System Settings → Privacy & Security* và bấm **Open Anyway**. Muốn bỏ bước này, cần chứng chỉ "Developer ID Application" (Apple Developer Program) và notarize bản build.
