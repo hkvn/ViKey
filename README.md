@@ -1,70 +1,76 @@
 # ViKey
 [![GitHub release](https://img.shields.io/github/v/release/hkvn/ViKey.svg)](https://github.com/hkvn/ViKey/releases/latest)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey.svg)
 
 ### [Tải bản mới nhất](https://github.com/hkvn/ViKey/releases/latest)
 
-### Bộ gõ Tiếng Việt nguồn mở cho macOS, phát triển tiếp từ [OpenKey](https://github.com/tuyenvm/OpenKey) của Mai Vũ Tuyên.
+**Bộ gõ Tiếng Việt nguồn mở cho macOS**, phát triển tiếp từ [OpenKey](https://github.com/tuyenvm/OpenKey) của Mai Vũ Tuyên.
 ViKey dùng kỹ thuật `Backspace`, không bị lỗi gạch chân như bộ gõ mặc định của macOS. Hoàn toàn miễn phí và là nguồn mở theo giấy phép GPL-3.0.
 
-Yêu cầu: **macOS 13 trở lên**.
+> **Lưu ý:** khi dùng ViKey, hãy tắt hẳn bộ gõ khác (kể cả OpenKey), vì hai bộ gõ chạy cùng lúc sẽ gõ sai.
 
-### Lưu ý: khi dùng ViKey, hãy tắt hẳn bộ gõ khác (kể cả OpenKey), vì hai bộ gõ chạy cùng lúc sẽ gõ sai.
+<p align="center">
+  <img src="docs/images/settings-typing-light.png" width="420" alt="Cài đặt ViKey - Bộ gõ">
+  <img src="docs/images/settings-macro-dark.png" width="420" alt="Cài đặt ViKey - Gõ tắt (giao diện tối)">
+</p>
 
 ## Điểm mới so với OpenKey
-- Cửa sổ cài đặt mới theo phong cách System Settings của macOS (SwiftUI), hỗ trợ giao diện sáng / tối.
-- Báo cho bạn biết khi một ứng dụng bật Secure Input làm bộ gõ không gõ được, và cách khắc phục.
+- Cửa sổ cài đặt mới theo phong cách System Settings của macOS, hỗ trợ giao diện sáng / tối.
+- Báo cho bạn biết khi một ứng dụng bật **Secure Input** làm bộ gõ không gõ được, và cách khắc phục.
 - Kiểm tra bản mới qua GitHub Releases của ViKey.
-- Khởi động cùng macOS bằng SMAppService, không cần ứng dụng phụ.
+- Khởi động cùng macOS hoạt động trở lại (dùng SMAppService, không cần ứng dụng phụ).
 - Tự chép cài đặt (gõ tắt, phím tắt, tuỳ chọn) từ OpenKey ở lần chạy đầu.
 - Sửa nhiều lỗi: chuyển mã ký tự cuối, chữ hoa khi chuyển mã, chính tả "uych", gõ trong Spotlight, bộ gõ bị tắt sau khi chuyển mã nhanh,...
 
-## Hỗ trợ kiểu gõ
-- Telex
-- VNI
-- Simple Telex
+## Tính năng
+**Kiểu gõ:** Telex, VNI, Simple Telex 1, Simple Telex 2.
 
-## Bảng mã thông dụng:
-- Unicode (Unicode dựng sẵn).
-- TCVN3 (ABC).
-- VNI Windows.
-- Unicode Compound (Unicode tổ hợp).
-- Vietnamese Locale CP 1258.
-- ...
+**Bảng mã:** Unicode dựng sẵn, TCVN3 (ABC), VNI Windows, Unicode tổ hợp, Vietnamese Locale CP 1258.
 
-## Tính năng:
-- **Modern orthography** (On/Off) - Đặt dấu oà, uý thay vì òa, úy.
-- **Quick Telex** (On/Off) - Gõ nhanh (cc=ch, gg=gi, kk=kh, nn=ng, qq=qu, pp=ph, tt=th).
-- **Grammar check** (On/Off) - Kiểm tra ngữ pháp.
-- **Spelling check** (On/Off) - Kiểm tra chính tả.
-- **Restore key if invalid word** (on/off) - Phục hồi phím với từ sai.
-- **Run on startup** (On/Off) - Chạy cùng macOS.
-- **Gray menu bar icon** (On/Off) - Biểu tượng xám trên thanh menu phù hợp với chế độ Dark mode.
-- **Switch input mode by shortcut key** - Đổi chế độ gõ bằng phím tắt tùy chọn.
-- **Autocorrect fixed** (On/Off) - Sửa lỗi autocorrect trên trình duyệt như Chrome, Safari, Firefox, Microsoft Excel.
-- **Underline issue fixed on macOS** (On/Off) - Sửa lỗi gạch chân trên macOS.
-- **Tạm tắt kiểm tra chính tả bằng phím Ctrl** (On/Off) (Bản 1.5 về sau).
-- **Tạm tắt ViKey bằng phím Cmd** (On/Off) (Bản 2.0.1 về sau).
-- **Cho phép dùng f z w j làm phụ âm đầu** (On/Off) (Bản 1.5 về sau).
-- **Gõ tắt phụ âm đầu: f->ph, j->gi, w->qu** (On/Off) (Bản 1.6 về sau).
-- **Gõ tắt phụ âm cuối: g->ng, h->nh, k->ch** (On/Off) (Bản 1.6 về sau).
-- **Hiện biểu tượng trên thanh Dock** (On/Off) (Bản 2.0.1 về sau). Bấm vào icon trên thanh Dock sẽ mở nhanh cửa sổ Cài đặt.
-- **Macro** - Tính năng gõ tắt vô cùng tiện lợi. Gõ tắt của macOS chỉ hỗ trợ 20 ký tự, còn ViKey không giới hạn ký tự.
-- **Chuyển chế độ thông minh:** (On/Off) (Bản 1.2 về sau) - Bạn đang dùng chế độ gõ Tiếng Việt trên ứng dụng A, bạn chuyển qua ứng dụng B trước đó bạn dùng chế độ gõ Tiếng Anh, ViKey sẽ tự động chuyển qua chế độ gõ Tiếng Anh cho bạn, khi bạn quay lại ứng dụng A, ViKey tất nhiên sẽ chuyển lại chế độ gõ tiếng Việt, rất cơ động.
-- **Viết Hoa chữ cái đầu câu** (On/Off) (Bản 1.2 về sau) - Khi gõ văn bản dài, đôi khi bạn quên ghi hoa chữ cái đầu câu khi kết thúc một câu hoặc khi xuống hàng, tính năng này sẽ tự ghi hoa chữ cái đầu câu cho bạn, thật tuyệt vời.
-- **Chế độ “Gửi từng phím”:** (On/Off) (Bản 1.1 về sau) mặc định dùng kỹ thuật mới gửi dữ liệu 1 lần thay vì gửi nhiều lần cho chuỗi ký tự, nên nếu có ứng dụng nào không tương thích, hãy bật tính năng này lên, mặc định thì nên tắt vì kỹ thuật mới sẽ chạy nhanh hơn.
-- **Kiểm tra bản mới:** khi mở ViKey hoặc trong mục Giới thiệu, ViKey kiểm tra bản phát hành mới nhất trên GitHub.
-- **Công cụ chuyển mã:** (Bản 1.4 về sau) hỗ trợ chuyển mã qua lại văn bản, thích hợp cho việc chuyển đổi văn bản cũ viết bằng VNI, TCVN3 qua Unicode,... Hỗ trợ cấu hình phím tắt chuyển mã nhanh, bảng cấu hình tùy chọn chuyển mã.
-- **Tự ghi nhớ bảng mã theo ứng dụng:** (Bản 2.0.1 về sau) Phù hợp cho các bạn dùng Photoshop, CAD,... với các bảng mã VNI, TCVN3. ViKey tự ghi nhớ ứng dụng nào dùng bảng mã nào để lần sau sử dụng Photoshop, CAD,... ViKey có thể tự chuyển sang bảng mã đó.
-- ...
+**Bộ gõ**
+- Phím tắt chuyển Tiếng Việt / English tuỳ chọn (⌃ ⌥ ⇧ ⌘ + một phím), có thể kêu beep khi chuyển.
+- Tạm tắt ViKey bằng phím ⌘.
+- Chuyển chế độ thông minh: nhớ Tiếng Việt / English cho từng ứng dụng.
+- Tự ghi nhớ bảng mã theo ứng dụng, hợp với Photoshop, CAD,... dùng VNI hoặc TCVN3.
+- Tự tắt tiếng Việt khi bộ gõ hệ thống không phải tiếng Anh.
 
-[Các phiên bản](https://github.com/hkvn/ViKey/releases) · [Changelog của OpenKey](https://github.com/tuyenvm/OpenKey/blob/master/CHANGELOG.md)
+**Chính tả**
+- Kiểm tra chính tả, tự khôi phục phím khi từ không phải tiếng Việt.
+- Cho phép "z w j f" làm phụ âm, tạm tắt chính tả bằng phím ⌃.
+- Đặt dấu kiểu mới (oà, uý) hoặc kiểu cũ (òa, úy).
+- Viết hoa chữ cái đầu câu.
+
+**Gõ tắt**
+- Gõ tắt không giới hạn độ dài (gõ tắt của macOS chỉ tới 20 ký tự), nhập / xuất danh sách ra file.
+- Dùng gõ tắt cả khi tắt tiếng Việt, tự viết hoa theo phím tắt.
+- Gõ nhanh phụ âm đôi: cc → ch, gg → gi, kk → kh, nn → ng, qq → qu, pp → ph, tt → th.
+- Gõ tắt phụ âm đầu (f → ph, j → gi, w → qu) và phụ âm cuối (g → ng, h → nh, k → ch).
+
+**Hệ thống**
+- Khởi động cùng macOS, biểu tượng đơn sắc trên thanh menu, hiện biểu tượng trên Dock.
+- Sửa lỗi gợi ý trên trình duyệt và Excel, sửa lỗi trên Chromium (beta).
+- Chế độ "Gửi từng phím" cho ứng dụng không tương thích.
+- Tương thích Telex trên layout khác (Dvorak, Colemak,...).
+
+**Công cụ chuyển mã:** chuyển văn bản trong clipboard giữa các bảng mã (ví dụ VNI, TCVN3 sang Unicode), có phím tắt chuyển mã nhanh.
 
 ## Cài đặt
 1. Tải file `ViKey-x.y.z.dmg` mới nhất từ [trang phát hành](https://github.com/hkvn/ViKey/releases/latest), mở ra và kéo `ViKey.app` vào thư mục Applications.
-2. Lần đầu mở, nếu macOS chặn ứng dụng: vào *System Settings → Privacy & Security*, bấm **Open Anyway**.
+2. Lần đầu mở, nếu macOS chặn ứng dụng: vào *System Settings → Privacy & Security*, bấm **Open Anyway**. (ViKey được ký số nhưng chưa được Apple notarize.)
 3. ViKey cần quyền Accessibility: vào *System Settings → Privacy & Security → Accessibility* và bật `ViKey`. **Không tắt quyền này khi đang dùng ViKey.**
 
 Nếu bạn chuyển từ OpenKey sang: ViKey tự chép cài đặt của OpenKey ở lần chạy đầu và đề nghị thoát OpenKey nếu nó đang chạy.
+
+## Cập nhật
+ViKey kiểm tra bản mới mỗi khi khởi động (tắt được trong *Cài đặt → Hệ thống*), hoặc khi bạn bấm **Kiểm tra bản mới…** trong tab *Giới thiệu*. Khi có bản mới, bấm **Tải về** để mở trang phát hành, tải file `dmg` và thay `ViKey.app` cũ trong Applications. Các bản phát hành được ký cùng một chứng chỉ, nên bạn không phải cấp lại quyền Accessibility.
+
+Danh sách các phiên bản: [Releases](https://github.com/hkvn/ViKey/releases) · [Changelog của OpenKey](https://github.com/tuyenvm/OpenKey/blob/master/CHANGELOG.md)
+
+## Không gõ được tiếng Việt?
+- **Biểu tượng ổ khoá trên thanh menu:** một ứng dụng đang bật Secure Input (ô mật khẩu, "Secure Keyboard Entry" của Terminal / iTerm,...). Bấm vào biểu tượng ViKey để xem ứng dụng nào và cách khắc phục.
+- **Mất quyền Accessibility:** vào *System Settings → Privacy & Security → Accessibility*, xoá `ViKey` bằng nút "−", rồi mở lại ViKey để cấp quyền.
+- **Bộ gõ khác đang chạy:** tắt các bộ gõ tiếng Việt khác.
 
 ## Phát triển
 - Build từ mã nguồn và tạo bản phát hành: xem [macOS_Build.md](macOS_Build.md).
