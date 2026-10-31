@@ -49,8 +49,7 @@ enum Option: String, CaseIterable {
         let value: Int32 = on ? 1 : 0
         switch self {
         case .checkSpelling:
-            vCheckSpelling = value
-            OnSpellCheckingChanged()
+            SetCheckSpelling(value)
         case .restoreIfWrongSpelling: vRestoreIfWrongSpelling = value
         case .allowConsonantZFWJ: vAllowConsonantZFWJ = value
         case .tempOffSpelling: vTempOffSpelling = value
@@ -107,11 +106,13 @@ enum HotKey {
     }
 
     static func title(of status: Int32) -> String {
+        let keyCode = UInt16(UInt32(bitPattern: status) & 0xFF)
         let character = UInt16((UInt32(bitPattern: status) >> 24) & 0xFF)
         if character == noKey || character == 0 {
             return "Không"
         }
-        if character == UInt16(kVK_Space) {
+        //the key code: the character of Space (49) is also "1"
+        if keyCode == UInt16(kVK_Space) {
             return "Space"
         }
         guard let scalar = UnicodeScalar(character) else { return "?" }

@@ -8,8 +8,10 @@
 
 #import "OpenKeyManager.h"
 #import "Logging.h"
+#import "EngineBridge.h"
 
 extern void OpenKeyInit(void);
+extern void RefreshClipboardText(void);
 
 extern CGEventRef OpenKeyCallback(CGEventTapProxy proxy,
                                   CGEventType type,
@@ -90,6 +92,7 @@ static CFRunLoopRef       tapRunLoop;
     [thread start];
     dispatch_semaphore_wait(started, DISPATCH_TIME_FOREVER);
     VKLog(@"tap", @"event tap started");
+    RefreshClipboardText();
     
     return YES;
 }
@@ -102,6 +105,8 @@ static CFRunLoopRef       tapRunLoop;
         CFRunLoopRef runLoop = tapRunLoop;
         CFRunLoopSourceRef source = runLoopSource;
         CFMachPortRef tap = eventTap;
+        //at once, even if the keyboard thread is stuck: a new tap after wake must not handle the keys twice
+        CGEventTapEnable(tap, false);
         CFRunLoopPerformBlock(runLoop, kCFRunLoopCommonModes, ^{
             CGEventTapEnable(tap, false);
             CFRunLoopRemoveSource(runLoop, source, kCFRunLoopCommonModes);
@@ -152,6 +157,10 @@ static CFRunLoopRef       tapRunLoop;
     NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
     NSString *htmlString = [pasteboard stringForType:NSPasteboardTypeHTML];
     NSString *rawString = [pasteboard stringForType:NSPasteboardTypeString];
+    //changing the case of HTML would also change its tags and links: keep only the text then
+    if ([VKConvertTool option:VKConvertOptionAllCaps] || [VKConvertTool option:VKConvertOptionAllLower] ||
+        [VKConvertTool option:VKConvertOptionCapsFirstLetter] || [VKConvertTool option:VKConvertOptionCapsEachWord])
+        htmlString = nil;
     bool converted = false;
     if (htmlString != nil) {
         htmlString = ConvertUtil(htmlString);

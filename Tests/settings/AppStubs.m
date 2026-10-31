@@ -15,7 +15,7 @@ int vLanguage = 1, vInputType = 0, vFreeMark = 0, vCodeTable = 0, vSwitchKeyStat
 
 AppDelegate* appDelegate = nil;
 
-void OnSpellCheckingChanged(void) {}
+void SetCheckSpelling(int on) { vCheckSpelling = on; }
 void saveSmartSwitchKeyData(void) {}
 void ReloadExcludedApps(void) {}
 

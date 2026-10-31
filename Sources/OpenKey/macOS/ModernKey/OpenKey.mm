@@ -27,6 +27,9 @@
 #define TARGET_APP_MAX_AGE 0.5 //seconds, see getTargetApp()
 #define TARGET_APP_CHECK_DELAY 0.3 //seconds, see CheckTypingAppSoon()
 #define AX_TIMEOUT 0.05 //seconds, see FocusedApp()
+#define AX_RETRY_DELAY 2.0 //seconds: Accessibility did not answer, do not wait for it again before this
+#define FOCUS_MODIFIERS (kCGEventFlagMaskCommand | kCGEventFlagMaskControl | kCGEventFlagMaskAlternate)
+#define MAX_CODE_TABLE 4 //code tables 0 to 4, see OpenKeyManager getTableCodes
 #define SLOW_EVENT_LOG 20000 //microseconds: handling one event slower than this is logged
 #define MAX_CLIPBOARD_MACRO 2000 //characters of {clipboard} in a macro
 
@@ -103,11 +106,27 @@ extern "C" {
     NSString* _memoryApp = @""; //last typing app which is not ViKey: smart switch remembers the mode for it
     bool _checkTypingAppPending = false;
     
-    //see FocusedApp()
-    AXUIElementRef _systemWide = NULL;
-    pid_t _focusedPid = 0;
-    NSString* _focusedApp = nil;
+    //finds the app with the keyboard focus, see FocusedApp(). The keyboard thread uses its own one while holding
+    //the engine lock; the main thread uses its own one without the lock, because Accessibility can take AX_TIMEOUT
+    struct AppDetector {
+        AXUIElementRef systemWide = NULL;
+        pid_t focusedPid = 0;
+        NSString* focusedApp = nil;
+        CFAbsoluteTime accessibilityRetryTime = 0;
+    };
+    AppDetector _keyboardDetector, _mainDetector;
+    
+    struct Detection {
+        NSString* app;
+        NSInteger method; //see VKEngineStatus.detectMethod
+        bool accessibilityAnswered;
+        double time; //microseconds
+    };
     bool _accessibilityAnswered = true;
+    
+    //for {clipboard} in macros, see RefreshClipboardText()
+    NSString* _clipboardText = @"";
+    NSInteger _clipboardChangeCount = -1; //main thread only
     
     //for the diagnostics window
     NSInteger _detectMethod = 0; //see VKEngineStatus.detectMethod
@@ -193,12 +212,33 @@ extern "C" {
         return _isExcludedAppActive;
     }
     
-    //for {clipboard} in macros
+    //for {clipboard} in macros; the engine lock is held. The keyboard thread does not read the clipboard itself:
+    //that could wait for the app which owns the clipboard
     static string ReadClipboardText() {
-        NSString* text = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString] ?: @"";
+        return string(_clipboardText.UTF8String ?: "");
+    }
+    
+    //on the main thread, after something which can copy (Cmd+C, a click, another app): keeps the clipboard text
+    //for {clipboard}, only when a macro uses it
+    void RefreshClipboardText() {
+        bool needed;
+        {
+            ENGINE_LOCK;
+            needed = _inited && vUseMacro && macrosUseClipboard();
+        }
+        if (!needed) {
+            _clipboardChangeCount = -1;
+            return;
+        }
+        NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+        if (pasteboard.changeCount == _clipboardChangeCount)
+            return;
+        _clipboardChangeCount = pasteboard.changeCount;
+        NSString* text = [pasteboard stringForType:NSPasteboardTypeString] ?: @"";
         if (text.length > MAX_CLIPBOARD_MACRO)
             text = [text substringWithRange:[text rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, MAX_CLIPBOARD_MACRO)]];
-        return string(text.UTF8String ?: "");
+        ENGINE_LOCK;
+        _clipboardText = text;
     }
     
     void UpdateFrontApp() {
@@ -213,7 +253,7 @@ extern "C" {
         ENGINE_LOCK;
         //load saved data
         vFreeMark = 0;//(int)[[NSUserDefaults standardUserDefaults] integerForKey:@"FreeMark"];
-        LOAD_DATA(vCodeTable, CodeTable); if (vCodeTable < 0) vCodeTable = 0;
+        LOAD_DATA(vCodeTable, CodeTable); if (vCodeTable < 0 || vCodeTable > MAX_CODE_TABLE) vCodeTable = 0;
         LOAD_DATA(vCheckSpelling, Spelling);
         LOAD_DATA(vQuickTelex, QuickTelex);
         LOAD_DATA(vUseModernOrthography, ModernOrthography);
@@ -263,8 +303,8 @@ extern "C" {
         convertToolToCapsFirstLetter = [prefs boolForKey:@"convertToolToCapsFirstLetter"];
         convertToolToCapsEachWord = [prefs boolForKey:@"convertToolToCapsEachWord"];
         convertToolRemoveMark = [prefs boolForKey:@"convertToolRemoveMark"];
-        convertToolFromCode = [prefs integerForKey:@"convertToolFromCode"];
-        convertToolToCode = [prefs integerForKey:@"convertToolToCode"];
+        convertToolFromCode = MIN(MAX(0, [prefs integerForKey:@"convertToolFromCode"]), MAX_CODE_TABLE);
+        convertToolToCode = MIN(MAX(0, [prefs integerForKey:@"convertToolToCode"]), MAX_CODE_TABLE);
         convertToolHotKey = (int)[prefs integerForKey:@"convertToolHotKey"];
         if (convertToolHotKey == 0) {
             convertToolHotKey = EMPTY_HOTKEY;
@@ -341,46 +381,55 @@ extern "C" {
 
     //bundle id of the app with the keyboard focus, nil if Accessibility does not answer. Panels such as Spotlight,
     //Alfred, Raycast or the emoji picker take the keys without becoming the frontmost app
-    NSString* FocusedApp() {
-        if (_systemWide == NULL) {
-            _systemWide = AXUIElementCreateSystemWide();
+    static NSString* FocusedApp(AppDetector& detector, NSString* frontApp, pid_t frontPid, bool& answered) {
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        answered = false;
+        //it did not answer a moment ago: do not wait AX_TIMEOUT on every arrow key or click
+        if (now < detector.accessibilityRetryTime)
+            return nil;
+        if (detector.systemWide == NULL) {
+            detector.systemWide = AXUIElementCreateSystemWide();
             //an app which does not respond must not stop typing
-            AXUIElementSetMessagingTimeout(_systemWide, AX_TIMEOUT);
+            AXUIElementSetMessagingTimeout(detector.systemWide, AX_TIMEOUT);
         }
         CFTypeRef app = NULL;
         pid_t pid = 0;
-        _accessibilityAnswered = AXUIElementCopyAttributeValue(_systemWide, kAXFocusedApplicationAttribute, &app) == kAXErrorSuccess && app != NULL;
-        if (!_accessibilityAnswered)
+        answered = AXUIElementCopyAttributeValue(detector.systemWide, kAXFocusedApplicationAttribute, &app) == kAXErrorSuccess && app != NULL;
+        if (!answered) {
+            detector.accessibilityRetryTime = now + AX_RETRY_DELAY;
             return nil;
+        }
         AXUIElementGetPid((AXUIElementRef)app, &pid);
         CFRelease(app);
         if (pid <= 0)
             return nil;
-        if (pid == _frontPid)
-            return _frontApp;
+        if (pid == frontPid)
+            return frontApp;
         //asking for the bundle id is slow (about 50 µs): remember the last answer
-        if (pid != _focusedPid) {
+        if (pid != detector.focusedPid) {
             NSRunningApplication* focused = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
-            _focusedPid = pid;
-            _focusedApp = focused.bundleIdentifier ?: focused.localizedName;
+            detector.focusedPid = pid;
+            detector.focusedApp = focused.bundleIdentifier ?: focused.localizedName;
         }
-        return _focusedApp;
+        return detector.focusedApp;
     }
     
-    NSString* DetectTargetApp() {
+    static Detection DetectTargetApp(AppDetector& detector, NSString* frontApp, pid_t frontPid) {
+        Detection detection;
         uint64_t start = mach_absolute_time();
-        NSString* app = FocusedApp();
-        if (app != nil && ![app isEqualToString:_frontApp]) {
-            _detectMethod = 1;
+        NSString* app = FocusedApp(detector, frontApp, frontPid, detection.accessibilityAnswered);
+        if (app != nil && ![app isEqualToString:frontApp]) {
+            detection.method = 1;
         } else if (isSpotlightVisible()) { //in case Accessibility does not see the Spotlight panel
             app = @"com.apple.Spotlight";
-            _detectMethod = 2;
+            detection.method = 2;
         } else {
-            app = _frontApp;
-            _detectMethod = 0;
+            app = frontApp;
+            detection.method = 0;
         }
-        _detectTime = MachToMicroseconds(mach_absolute_time() - start);
-        return app ?: @"";
+        detection.app = app ?: @"";
+        detection.time = MachToMicroseconds(mach_absolute_time() - start);
+        return detection;
     }
     
     void saveSmartSwitchKeyData() {
@@ -412,6 +461,8 @@ extern "C" {
     //addNewApp: remember the mode for an app seen the first time; not after a click, which also opens menu bar items
     void OnTypingAppChanged(NSString* app, bool addNewApp) {
         VKLog(@"app", @"typing in %@%@", app, _detectMethod == 1 ? @" (focused panel)" : (_detectMethod == 2 ? @" (Spotlight window)" : @""));
+        if (_detectTime > SLOW_EVENT_LOG)
+            VKLog(@"app", @"finding the app took %.1f ms", _detectTime / 1000);
         _typingApp = app;
         _isExcludedAppActive = [_excludedApps containsObject:app];
         if (app.length > 0 && ![app isEqualToString:OPENKEY_BUNDLE]) {
@@ -428,7 +479,7 @@ extern "C" {
                         vLanguage = _languageTemp & 0x01;
                         changed = true;
                     }
-                    if (vRememberCode && (_languageTemp >> 1) != vCodeTable) { //for remember table code feature
+                    if (vRememberCode && (_languageTemp >> 1) != vCodeTable && (_languageTemp >> 1) <= MAX_CODE_TABLE) { //for remember table code feature
                         vCodeTable = _languageTemp >> 1;
                         onTableCodeChange();
                         changed = true;
@@ -447,17 +498,46 @@ extern "C" {
         });
     }
     
+    //the engine lock is held
+    static void ApplyDetection(const Detection& detection, CFAbsoluteTime time, bool addNewApp) {
+        _detectMethod = detection.method;
+        _detectTime = detection.time;
+        _accessibilityAnswered = detection.accessibilityAnswered;
+        _targetApp = detection.app;
+        _targetAppTime = time;
+        if (![_targetApp isEqualToString:_typingApp])
+            OnTypingAppChanged(_targetApp, addNewApp);
+    }
+    
     //Panels such as Spotlight take keys but they are never the frontmost app. Checking it is slow (about 0.4 ms),
-    //so check again only after something which can move the focus (see InvalidateTargetApp), or when the answer is old
+    //so check again only after something which can move the focus (see InvalidateTargetApp), or when the answer is old.
+    //On the keyboard thread, the engine lock is held
     NSString* getTargetApp(bool addNewApp=true) {
         CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-        if (_targetApp == nil || now - _targetAppTime > TARGET_APP_MAX_AGE) {
-            _targetApp = DetectTargetApp();
-            _targetAppTime = now;
-            if (![_targetApp isEqualToString:_typingApp])
-                OnTypingAppChanged(_targetApp, addNewApp);
-        }
+        if (_targetApp == nil || now - _targetAppTime > TARGET_APP_MAX_AGE)
+            ApplyDetection(DetectTargetApp(_keyboardDetector, _frontApp, _frontPid), now, addNewApp);
         return _targetApp;
+    }
+    
+    //on the main thread: finds the typing app without holding the engine lock, so the keyboard thread never waits
+    //for Accessibility (it can take AX_TIMEOUT while an app is starting), then applies it
+    static void CheckTypingAppNow(bool addNewApp) {
+        NSString* frontApp;
+        pid_t frontPid;
+        {
+            ENGINE_LOCK;
+            if (!_inited)
+                return;
+            frontApp = _frontApp;
+            frontPid = _frontPid;
+        }
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        Detection detection = DetectTargetApp(_mainDetector, frontApp, frontPid);
+        ENGINE_LOCK;
+        //the frontmost app changed meanwhile: the check started for it applies
+        if (frontPid != _frontPid)
+            return;
+        ApplyDetection(detection, now, addNewApp);
     }
     
     //the focus may move after this event (Spotlight opens, a panel closes,...): check the app again soon,
@@ -467,24 +547,22 @@ extern "C" {
             return;
         _checkTypingAppPending = true;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(TARGET_APP_CHECK_DELAY * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            ENGINE_LOCK;
-            _checkTypingAppPending = false;
-            if (!_inited)
-                return;
-            _targetApp = nil;
-            getTargetApp(false);
+            {
+                ENGINE_LOCK;
+                _checkTypingAppPending = false;
+            }
+            //Cmd+C or a click on a menu may have copied something
+            RefreshClipboardText();
+            CheckTypingAppNow(false);
         });
     }
     
     //call on the main thread when the frontmost app changes
     void OnFrontAppChanged() {
         UpdateFrontApp();
-        ENGINE_LOCK;
-        if (!_inited)
-            return;
+        RefreshClipboardText();
         //the menu bar icon and the remembered mode follow the new app at once
-        _targetApp = nil;
-        getTargetApp();
+        CheckTypingAppNow(true);
     }
 
     BOOL shouldUseRecommendWorkaround() {
@@ -510,8 +588,9 @@ extern "C" {
         }
     }
     
-    void OnSpellCheckingChanged() {
+    void SetCheckSpelling(int on) {
         ENGINE_LOCK;
+        vCheckSpelling = on;
         vSetCheckSpelling();
     }
     
@@ -639,7 +718,8 @@ extern "C" {
         CGEventTapPostEvent(_proxy, eventBackSpaceDown);
         CGEventTapPostEvent(_proxy, eventBackSpaceUp);
         
-        if (IS_DOUBLE_CODE(vCodeTable)) { //VNI or Unicode Compound
+        //no length is known for keys typed in English mode: one unit each
+        if (IS_DOUBLE_CODE(vCodeTable) && !_syncKey.empty()) { //VNI or Unicode Compound
             if (_syncKey.back() > 1) {
                 if (!(vCodeTable == 3 && containUnicodeCompoundApp(getTargetApp()))) {
                     CGEventTapPostEvent(_proxy, eventBackSpaceDown);
@@ -661,7 +741,7 @@ extern "C" {
         CGEventTapPostEvent(_proxy, eventVkeyDown);
         CGEventTapPostEvent(_proxy, eventVkeyUp);
         
-        if (IS_DOUBLE_CODE(vCodeTable)) { //VNI or Unicode Compound
+        if (IS_DOUBLE_CODE(vCodeTable) && !_syncKey.empty()) { //VNI or Unicode Compound
             if (_syncKey.back() > 1) {
                 if (!(vCodeTable == 3 && containUnicodeCompoundApp(getTargetApp()))) {
                     CGEventTapPostEvent(_proxy, eventVkeyDown);
@@ -775,15 +855,17 @@ extern "C" {
         
         _newEventDown = CGEventCreateKeyboardEvent(myEventSource, 0, true);
         _newEventUp = CGEventCreateKeyboardEvent(myEventSource, 0, false);
-        CGEventKeyboardSetUnicodeString(_newEventDown, _willContinuteSending ? 16 : _newCharSize - offset, _newCharString);
-        CGEventKeyboardSetUnicodeString(_newEventUp, _willContinuteSending ? 16 : _newCharSize - offset, _newCharString);
+        //_j units: a character can take two (VNI, Unicode compound), so a part can have 17 or 18
+        CGEventKeyboardSetUnicodeString(_newEventDown, _j, _newCharString);
+        CGEventKeyboardSetUnicodeString(_newEventUp, _j, _newCharString);
         CGEventTapPostEvent(_proxy, _newEventDown);
         CGEventTapPostEvent(_proxy, _newEventUp);
         CFRelease(_newEventDown);
         CFRelease(_newEventUp);
 
         if (_willContinuteSending) {
-            SendNewCharString(dataFromMacro, dataFromMacro ? _k : 16);
+            //the next part starts at the first character not sent yet
+            SendNewCharString(dataFromMacro, dataFromMacro ? _k : pData->newCharCount - 1 - _k);
         }
         
         //the case when hCode is vRestore or vRestoreAndStartNewSession, the word is invalid and last key is control key such as TAB, LEFT ARROW, RIGHT ARROW,...
@@ -818,6 +900,7 @@ extern "C" {
         else
             vLanguage = 0;
         startNewSession();
+        _syncKey.clear();
         if (vUseSmartSwitchKey)
             RememberAppMode();
         SaveModeAndRefreshMenu();
@@ -933,8 +1016,9 @@ extern "C" {
         }
         
         //things which can move the focus to another app or panel: click, Cmd+Space, Cmd+Tab, Escape, Return,...
+        //not arrows or function keys: holding one would check the app many times a second
         if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown ||
-            (type == kCGEventKeyDown && (OTHER_CONTROL_KEY || _keycode == KEY_ESC || _keycode == KEY_RETURN || _keycode == KEY_ENTER))) {
+            (type == kCGEventKeyDown && ((_flag & FOCUS_MODIFIERS) || _keycode == KEY_ESC || _keycode == KEY_RETURN || _keycode == KEY_ENTER))) {
             InvalidateTargetApp();
             CheckTypingAppSoon();
         }
@@ -999,6 +1083,12 @@ extern "C" {
         
         _proxy = proxy;
         
+        //handle mouse: a click starts a new word, in English mode too (macros)
+        if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown) {
+            RequestNewSession();
+            return event;
+        }
+        
         //the app which receives the keys: it can be a panel over the frontmost app (Spotlight, Alfred,...).
         //When it changes, its remembered mode is applied
         if (type == kCGEventKeyDown)
@@ -1006,6 +1096,9 @@ extern "C" {
         
         //If is in english mode, or the app always uses English
         if (vLanguage == 0 || _isExcludedAppActive) {
+            //keys typed here have no saved length, see SendBackspace
+            if (type == kCGEventKeyDown)
+                _syncKey.clear();
             if (vUseMacro && vUseMacroInEnglishMode && type == kCGEventKeyDown) {
                 vEnglishMode((type == kCGEventKeyDown ? vKeyEventState::KeyDown : vKeyEventState::MouseDown),
                              _keycode,
@@ -1020,11 +1113,6 @@ extern "C" {
             return event;
         }
         
-        //handle mouse
-        if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown) {
-            RequestNewSession();
-            return event;
-        }
 
         //if "turn off Vietnamese when in other language" mode on
         if (vOtherLanguage && !_isEnglishInputSource) {

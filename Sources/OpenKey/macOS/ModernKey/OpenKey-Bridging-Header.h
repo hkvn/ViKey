@@ -41,4 +41,5 @@ extern int vPerformLayoutCompat;
 extern AppDelegate* appDelegate;
 
 //defined in OpenKey.mm
-void OnSpellCheckingChanged(void);
+/// sets vCheckSpelling while holding the engine lock: the keyboard thread also changes it
+void SetCheckSpelling(int on);

@@ -22,9 +22,11 @@ extern NSNotificationName const VKMacroStoreDidChangeNotification;
 
 @interface VKMacroStore : NSObject
 +(NSArray<VKMacro*>*)allMacros;
++(NSInteger)count;
 +(BOOL)hasMacro:(NSString*)text;
-/// adds the macro, or changes the content of an existing one
-+(void)setMacro:(NSString*)text content:(NSString*)content;
+/// adds the macro, or changes the content of an existing one. NO if the text is longer than 255 bytes
+/// or the content longer than 65535 bytes (the limits of the saved data)
++(BOOL)setMacro:(NSString*)text content:(NSString*)content;
 +(void)deleteMacro:(NSString*)text;
 /// keepCurrent: existing macros are not changed; otherwise the old macros are removed first
 +(void)addMacros:(NSArray<VKMacro*>*)macros keepCurrent:(BOOL)keepCurrent NS_SWIFT_NAME(addMacros(_:keepCurrent:));
@@ -54,6 +56,8 @@ typedef NS_ENUM(NSInteger, VKConvertOption) {
 @interface VKAppMemory : NSObject
 /// bundle id -> status (bit 0: Vietnamese, other bits: code table)
 +(NSDictionary<NSString*, NSNumber*>*)allApps;
+/// -1 if the app is not remembered
++(NSInteger)statusForApp:(NSString*)bundleId;
 +(void)setStatus:(int)status forApp:(NSString*)bundleId;
 +(void)removeApp:(NSString*)bundleId;
 +(void)removeAllApps;

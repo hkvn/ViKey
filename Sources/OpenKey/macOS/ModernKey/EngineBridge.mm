@@ -60,17 +60,28 @@ NSNotificationName const VKMacroStoreDidChangeNotification = @"VKMacroStoreDidCh
     return result;
 }
 
++(NSInteger)count {
+    vector<vector<Uint32>> keys;
+    vector<string> texts, contents;
+    ENGINE_LOCK;
+    getAllMacro(keys, texts, contents);
+    return (NSInteger)texts.size();
+}
+
 +(BOOL)hasMacro:(NSString*)text {
     ENGINE_LOCK;
     return hasMacro(string(text.UTF8String));
 }
 
-+(void)setMacro:(NSString*)text content:(NSString*)content {
++(BOOL)setMacro:(NSString*)text content:(NSString*)content {
+    BOOL added;
     {
         ENGINE_LOCK;
-        addMacro(string(text.UTF8String), string(content.UTF8String));
+        added = addMacro(string(text.UTF8String), string(content.UTF8String));
     }
-    [self save];
+    if (added)
+        [self save];
+    return added;
 }
 
 +(void)deleteMacro:(NSString*)text {
@@ -142,6 +153,7 @@ NSNotificationName const VKMacroStoreDidChangeNotification = @"VKMacroStoreDidCh
 }
 
 +(void)setFromCode:(NSInteger)code {
+    code = MIN(MAX(code, 0), 4);
     convertToolFromCode = (Uint8)code;
     [[NSUserDefaults standardUserDefaults] setInteger:code forKey:@"convertToolFromCode"];
 }
@@ -151,6 +163,7 @@ NSNotificationName const VKMacroStoreDidChangeNotification = @"VKMacroStoreDidCh
 }
 
 +(void)setToCode:(NSInteger)code {
+    code = MIN(MAX(code, 0), 4);
     convertToolToCode = (Uint8)code;
     [[NSUserDefaults standardUserDefaults] setInteger:code forKey:@"convertToolToCode"];
 }
@@ -181,6 +194,11 @@ NSNotificationName const VKMacroStoreDidChangeNotification = @"VKMacroStoreDidCh
         result[toNSString(bundleIds[i])] = @(statuses[i]);
     }
     return result;
+}
+
++(NSInteger)statusForApp:(NSString*)bundleId {
+    ENGINE_LOCK;
+    return findAppInputMethodStatus(string(bundleId.UTF8String));
 }
 
 +(void)setStatus:(int)status forApp:(NSString*)bundleId {

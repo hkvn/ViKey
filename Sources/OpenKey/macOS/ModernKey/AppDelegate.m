@@ -414,9 +414,13 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 
     [[NSUserDefaults standardUserDefaults] setInteger:1 forKey:@"GrayIcon"];
     [[NSUserDefaults standardUserDefaults] setInteger:1 forKey:@"RunOnStartup"];
+    //the macros must follow the new code table, and the word typed before is forgotten
+    OnTableCodeChange();
+    RequestNewSession();
     EngineUnlock();
 
     [self fillData];
+    [self setRunOnStartup:YES];
 }
 
 -(void)setRunOnStartup:(BOOL)val {
@@ -471,58 +475,33 @@ static BOOL startedBefore(const struct proc_bsdinfo* a, const struct proc_bsdinf
 }
 
 - (void) fillData {
-    //the keyboard thread also changes the mode: it saves it first (see SaveModeAndRefreshMenu), then this reads it
+    NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    //the keyboard thread also changes the mode: it saves it first (see SaveModeAndRefreshMenu), then this reads it.
+    //Only the engine options are set while holding the lock: the keyboard thread does not wait for the menu
     EngineLock();
-    //fill data
-    NSInteger intInputMethod = [[NSUserDefaults standardUserDefaults] integerForKey:@"InputMethod"];
-    [menuInputMethod setState:(intInputMethod == 1 ? NSControlStateValueOn : NSControlStateValueOff)];
-    vLanguage = (int)intInputMethod;
-    [self updateStatusIcon];
-    
-    NSInteger intInputType = [[NSUserDefaults standardUserDefaults] integerForKey:@"InputType"];
-    [mnuTelex setState:NSControlStateValueOff];
-    [mnuVNI setState:NSControlStateValueOff];
-    [mnuSimpleTelex1 setState:NSControlStateValueOff];
-    [mnuSimpleTelex2 setState:NSControlStateValueOff];
-    if (intInputType == 0) {
-        [mnuTelex setState:NSControlStateValueOn];
-    } else if (intInputType == 1) {
-        [mnuVNI setState:NSControlStateValueOn];
-    } else if (intInputType == 2) {
-        [mnuSimpleTelex1 setState:NSControlStateValueOn];
-    } else if (intInputType == 3) {
-        [mnuSimpleTelex2 setState:NSControlStateValueOn];
-    }
-    vInputType = (int)intInputType;
-    
-    NSInteger intSwitchKeyStatus = [[NSUserDefaults standardUserDefaults] integerForKey:@"SwitchKeyStatus"];
-    vSwitchKeyStatus = (int)intSwitchKeyStatus;
+    vLanguage = (int)[defaults integerForKey:@"InputMethod"];
+    vInputType = (int)[defaults integerForKey:@"InputType"];
+    vSwitchKeyStatus = (int)[defaults integerForKey:@"SwitchKeyStatus"];
     if (vSwitchKeyStatus == 0)
         vSwitchKeyStatus = DEFAULT_SWITCH_STATUS;
-    
-    NSInteger intCode = [[NSUserDefaults standardUserDefaults] integerForKey:@"CodeTable"];
-    [mnuUnicode setState:NSControlStateValueOff];
-    [mnuTCVN setState:NSControlStateValueOff];
-    [mnuVNIWindows setState:NSControlStateValueOff];
-    [mnuUnicodeComposite setState:NSControlStateValueOff];
-    [mnuVietnameseLocaleCP1258 setState:NSControlStateValueOff];
-    if (intCode == 0) {
-        [mnuUnicode setState:NSControlStateValueOn];
-    } else if (intCode == 1) {
-        [mnuTCVN setState:NSControlStateValueOn];
-    } else if (intCode == 2) {
-        [mnuVNIWindows setState:NSControlStateValueOn];
-    } else if (intCode == 3) {
-        [mnuUnicodeComposite setState:NSControlStateValueOn];
-    } else if (intCode == 4) {
-        [mnuVietnameseLocaleCP1258 setState:NSControlStateValueOn];
-    }
-    vCodeTable = (int)intCode;
+    NSInteger savedCodeTable = [defaults integerForKey:@"CodeTable"];
+    vCodeTable = savedCodeTable >= 0 && savedCodeTable <= 4 ? (int)savedCodeTable : 0;
+    int language = vLanguage, inputType = vInputType, codeTable = vCodeTable;
     EngineUnlock();
     
-    //
-    NSInteger intRunOnStartup = [[NSUserDefaults standardUserDefaults] integerForKey:@"RunOnStartup"];
-    [self setRunOnStartup:intRunOnStartup ? YES : NO];
+    [menuInputMethod setState:(language == 1 ? NSControlStateValueOn : NSControlStateValueOff)];
+    [self updateStatusIcon];
+    
+    [mnuTelex setState:inputType == 0 ? NSControlStateValueOn : NSControlStateValueOff];
+    [mnuVNI setState:inputType == 1 ? NSControlStateValueOn : NSControlStateValueOff];
+    [mnuSimpleTelex1 setState:inputType == 2 ? NSControlStateValueOn : NSControlStateValueOff];
+    [mnuSimpleTelex2 setState:inputType == 3 ? NSControlStateValueOn : NSControlStateValueOff];
+    
+    [mnuUnicode setState:codeTable == 0 ? NSControlStateValueOn : NSControlStateValueOff];
+    [mnuTCVN setState:codeTable == 1 ? NSControlStateValueOn : NSControlStateValueOff];
+    [mnuVNIWindows setState:codeTable == 2 ? NSControlStateValueOn : NSControlStateValueOff];
+    [mnuUnicodeComposite setState:codeTable == 3 ? NSControlStateValueOn : NSControlStateValueOff];
+    [mnuVietnameseLocaleCP1258 setState:codeTable == 4 ? NSControlStateValueOn : NSControlStateValueOff];
 
     //refresh the settings window
     [[NSNotificationCenter defaultCenter] postNotificationName:SettingsWindowController.settingsDidChangeNotification object:nil];
