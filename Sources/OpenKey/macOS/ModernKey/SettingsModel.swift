@@ -100,10 +100,12 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var codeTable = 0
     @Published private(set) var switchKeyStatus: Int32 = 0
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private var observer: NSObjectProtocol?
 
-    init() {
+    /// tests pass their own defaults, so they do not touch the user's settings
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         reload()
         //the menu bar can change settings too
         observer = NotificationCenter.default.addObserver(forName: SettingsWindowController.settingsDidChangeNotification,

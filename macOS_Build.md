@@ -25,6 +25,17 @@ security find-certificate -c "Apple Development" -p | openssl x509 -noout -subje
 
 Nếu build trong Xcode, hãy chọn team của bạn trong *Signing & Capabilities*.
 
+### Chạy kiểm thử
+
+```sh
+scripts/run-tests.sh
+```
+
+- `Tests/engine`: bộ gõ (Telex, VNI, chính tả, cách đặt dấu), công cụ chuyển mã, gõ tắt, chuyển đổi UTF-8. Viết bằng C++, không cần Xcode project.
+- `Tests/settings`: logic của cửa sổ Cài đặt (phím tắt, các tuỳ chọn), dùng bản giả của AppDelegate nên không đụng tới cài đặt thật.
+
+GitHub Actions (`.github/workflows/macos.yml`) chạy kiểm thử và build ViKey khi một bản phát hành được publish trên GitHub, để kiểm tra bản đó build được trên máy sạch. Có thể chạy tay bằng nút **Run workflow** trong tab Actions. Script phát hành cũng chạy kiểm thử trên máy của bạn trước khi build.
+
 ### Vì sao nên ký bằng chứng chỉ thật
 
 macOS ghi nhớ quyền Accessibility theo chữ ký của ứng dụng. Nếu ký ad-hoc (`CODE_SIGN_IDENTITY="-"`), mỗi bản build có chữ ký khác nhau, nên phải cấp quyền lại sau mỗi lần build. Ký bằng cùng một chứng chỉ thì quyền được giữ khi build lại hoặc cập nhật.

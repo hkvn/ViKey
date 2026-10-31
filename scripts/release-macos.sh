@@ -84,6 +84,12 @@ echo "branch:   $BRANCH @ $(git rev-parse --short HEAD)"
 echo "identity: $IDENTITY (team $TEAM_ID)"
 [ "$DRY_RUN" = 1 ] && echo "mode:     dry run (nothing is published)"
 
+#--- tests
+step "Running tests"
+mkdir -p "$REPO_ROOT/build"
+"$REPO_ROOT/scripts/run-tests.sh" > "$REPO_ROOT/build/tests.log" 2>&1 || { tail -20 "$REPO_ROOT/build/tests.log" >&2; die "tests failed, see build/tests.log"; }
+tail -1 "$REPO_ROOT/build/tests.log"
+
 #--- build
 step "Building $APP_NAME.app"
 rm -rf "$OUT_DIR"

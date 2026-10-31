@@ -1,0 +1,31 @@
+name: macOS
+
+#only for releases (scripts/release-macos.sh publishes them); it can also be started by hand in the Actions tab
+on:
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Show Xcode version
+      run: xcodebuild -version
+
+    - name: Run tests
+      run: scripts/run-tests.sh
+
+    # No certificate on GitHub: sign ad-hoc, only to check that the app builds
+    - name: Build ViKey
+      run: |
+        xcodebuild -project Sources/OpenKey/macOS/OpenKey.xcodeproj -scheme OpenKey -configuration Release \
+          -derivedDataPath build/DerivedData \
+          CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="" PROVISIONING_PROFILE_SPECIFIER="" \
+          build
