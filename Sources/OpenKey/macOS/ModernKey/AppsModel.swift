@@ -59,6 +59,13 @@ private enum AppEntryCache {
         entries[entry.bundleId] = entry
         lock.unlock()
     }
+
+    /// apps which were not installed: look them up again, they may be installed now
+    static func removeUninstalled() {
+        lock.lock()
+        entries = entries.filter { $0.value.isInstalled }
+        lock.unlock()
+    }
 }
 
 final class AppsModel: ObservableObject {
@@ -74,10 +81,21 @@ final class AppsModel: ObservableObject {
 
     init() {
         reload()
+        //smart switch changes the remembered modes while the window is open
+        NotificationCenter.default.addObserver(self, selector: #selector(settingsDidChange),
+                                               name: SettingsWindowController.settingsDidChangeNotification, object: nil)
     }
 
-    /// the lists are shown at once; names and icons not looked up yet follow from the background
-    func reload() {
+    @objc private func settingsDidChange() {
+        reload()
+    }
+
+    /// the lists are shown at once; names and icons not looked up yet follow from the background.
+    /// recheckUninstalled: look up again the apps which were not installed
+    func reload(recheckUninstalled: Bool = false) {
+        if recheckUninstalled {
+            AppEntryCache.removeUninstalled()
+        }
         statuses = VKAppMemory.allApps().mapValues { $0.intValue }
         showEntries()
         let missing = Set(VKExcludedApps.bundleIds).union(statuses.keys).filter { AppEntryCache[$0] == nil }
@@ -139,12 +157,18 @@ final class AppsModel: ObservableObject {
     //MARK: remembered apps
     func languageBinding(for bundleId: String) -> Binding<Int> {
         Binding(get: { (self.statuses[bundleId] ?? 0) & 1 },
-                set: { self.setStatus(((self.statuses[bundleId] ?? 0) & ~1) | $0, for: bundleId) })
+                set: { self.setStatus((self.currentStatus(bundleId) & ~1) | $0, for: bundleId) })
     }
 
     func codeTableBinding(for bundleId: String) -> Binding<Int> {
         Binding(get: { (self.statuses[bundleId] ?? 0) >> 1 },
-                set: { self.setStatus(((self.statuses[bundleId] ?? 0) & 1) | ($0 << 1), for: bundleId) })
+                set: { self.setStatus((self.currentStatus(bundleId) & 1) | ($0 << 1), for: bundleId) })
+    }
+
+    /// from the engine, not the list: smart switch may have changed it since the list was read
+    private func currentStatus(_ bundleId: String) -> Int {
+        let status = VKAppMemory.status(forApp: bundleId)
+        return status >= 0 ? status : (statuses[bundleId] ?? 0)
     }
 
     private func setStatus(_ status: Int, for bundleId: String) {

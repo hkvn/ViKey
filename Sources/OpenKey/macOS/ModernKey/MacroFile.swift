@@ -31,10 +31,12 @@ enum MacroFile {
             text = String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
         } else if bytes.starts(with: [0xFE, 0xFF]) {
             text = String(data: data.dropFirst(2), encoding: .utf16BigEndian)
-        } else if let utf8 = String(data: data, encoding: .utf8) {
-            text = utf8
-        } else if data.count >= 2, data[data.startIndex + 1] == 0 {
-            text = String(data: data, encoding: .utf16LittleEndian)
+        } else if data.contains(0) {
+            //UTF-16 without a BOM; ASCII in UTF-16 is also valid UTF-8 (with NUL bytes), so check this first
+            let littleEndian = data.count >= 2 && data[data.startIndex + 1] == 0
+            text = String(data: data, encoding: littleEndian ? .utf16LittleEndian : .utf16BigEndian)
+        } else {
+            text = String(data: data, encoding: .utf8)
         }
         return text ?? String(decoding: data, as: UTF8.self)
     }

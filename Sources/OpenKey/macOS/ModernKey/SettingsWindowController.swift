@@ -39,7 +39,7 @@ extension NSWindowController {
         addTab(TypingSettingsView(model: model), title: "Bộ gõ", symbol: "keyboard")
         addTab(SpellingSettingsView(model: model), title: "Chính tả", symbol: "textformat.abc")
         addTab(MacroSettingsView(model: model), title: "Gõ tắt", symbol: "text.badge.plus")
-        addTab(AppsSettingsView(apps: apps), title: "Ứng dụng", symbol: "square.grid.2x2")
+        addTab(AppsSettingsView(apps: apps, model: model), title: "Ứng dụng", symbol: "square.grid.2x2")
         addTab(SystemSettingsView(model: model), title: "Hệ thống", symbol: "gearshape")
         addTab(AboutSettingsView(), title: "Giới thiệu", symbol: "info.circle")
 
@@ -69,7 +69,7 @@ extension NSWindowController {
 
     @objc func show() {
         model.reload()
-        apps.reload()
+        apps.reload(recheckUninstalled: true)
         showInFront()
     }
 }

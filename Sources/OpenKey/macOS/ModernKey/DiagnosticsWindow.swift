@@ -9,14 +9,14 @@
 import AppKit
 import SwiftUI
 
-struct DiagnosticsRow: Identifiable {
+struct DiagnosticsRow: Identifiable, Equatable {
     let label: String
     let value: String
     var warning = false
     var id: String { label }
 }
 
-struct DiagnosticsSection: Identifiable {
+struct DiagnosticsSection: Identifiable, Equatable {
     let title: String
     let rows: [DiagnosticsRow]
     var id: String { title }
@@ -46,9 +46,16 @@ final class DiagnosticsModel: ObservableObject {
         timer = nil
     }
 
+    //assigned only when something changed: the window is not drawn again every second
     func refresh() {
-        sections = Self.makeSections()
-        log = VKLogger.recentEntries()
+        let newSections = Self.makeSections()
+        if newSections != sections {
+            sections = newSections
+        }
+        let newLog = VKLogger.recentEntries()
+        if newLog != log {
+            log = newLog
+        }
     }
 
     var reportText: String {
@@ -130,8 +137,8 @@ final class DiagnosticsModel: ObservableObject {
             DiagnosticsRow(label: "Luôn dùng English", value: status.typingAppExcluded ? "Có" : "Không"),
         ]
         if vUseSmartSwitchKey != 0 {
-            let remembered = VKAppMemory.allApps()[status.typingApp]?.intValue
-            let value = remembered.map { memory -> String in
+            let remembered = VKAppMemory.status(forApp: status.typingApp)
+            let value = (remembered >= 0 ? remembered : nil).map { memory -> String in
                 let table = codeTables.indices.contains(memory >> 1) ? codeTables[memory >> 1] : "\(memory >> 1)"
                 return (memory & 1 != 0 ? "Tiếng Việt" : "English") + ", " + table
             }
@@ -165,7 +172,7 @@ final class DiagnosticsModel: ObservableObject {
             DiagnosticsRow(label: "Chuyển chế độ thông minh", value: onOff(vUseSmartSwitchKey)),
             DiagnosticsRow(label: "Nhớ bảng mã theo ứng dụng", value: onOff(vRememberCode)),
             DiagnosticsRow(label: "Tắt khi bộ gõ hệ thống không phải tiếng Anh", value: onOff(vOtherLanguage)),
-            DiagnosticsRow(label: "Gõ tắt", value: onOff(vUseMacro) + ", \(VKMacroStore.allMacros().count) từ"
+            DiagnosticsRow(label: "Gõ tắt", value: onOff(vUseMacro) + ", \(VKMacroStore.count()) từ"
                            + (MacroSync.shared.isEnabled ? ", đồng bộ" : "")),
             DiagnosticsRow(label: "Ứng dụng luôn dùng English", value: "\(VKExcludedApps.bundleIds.count)"),
             DiagnosticsRow(label: "Sửa lỗi gợi ý / Chromium", value: "\(onOff(vFixRecommendBrowser)) / \(onOff(vFixChromiumBrowser))"),

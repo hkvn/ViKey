@@ -159,6 +159,7 @@ struct MacroSettingsView: View {
 //MARK: - Ứng dụng
 struct AppsSettingsView: View {
     @ObservedObject var apps: AppsModel
+    @ObservedObject var model: SettingsModel
     @State private var confirmForgetAll = false
     @State private var search = ""
     private let codeTables = OpenKeyManager.getTableCodes() as? [String] ?? []
@@ -174,7 +175,7 @@ struct AppsSettingsView: View {
             Spacer()
             RowPicker(help: "Chế độ gõ", titles: [(1, "Tiếng Việt"), (0, "English")],
                       selection: apps.languageBinding(for: app.bundleId))
-            if vRememberCode != 0 {
+            if model[.rememberCode] {
                 RowPicker(help: "Bảng mã", titles: codeTables.enumerated().map { ($0.offset, $0.element) },
                           selection: apps.codeTableBinding(for: app.bundleId))
             }
@@ -183,6 +184,7 @@ struct AppsSettingsView: View {
     }
 
     var body: some View {
+        let shown = shownApps
         Form {
             Section {
                 if apps.excludedApps.isEmpty {
@@ -219,7 +221,7 @@ struct AppsSettingsView: View {
                     //A ScrollView, not a List: a List inside the form does not scroll with the mouse wheel
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(shownApps.enumerated()), id: \.element.id) { index, app in
+                            ForEach(Array(shown.enumerated()), id: \.element.id) { index, app in
                                 appRow(app)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 5)
@@ -237,7 +239,7 @@ struct AppsSettingsView: View {
                     .overlay {
                         if apps.isLoading {
                             ProgressView().controlSize(.small)
-                        } else if shownApps.isEmpty {
+                        } else if shown.isEmpty {
                             Text("Không tìm thấy ứng dụng nào.").foregroundColor(.secondary)
                         }
                     }

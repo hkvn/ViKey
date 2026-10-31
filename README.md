@@ -56,7 +56,7 @@ ViKey dùng kỹ thuật `Backspace`, không bị lỗi gạch chân như bộ g
 - Gõ tắt không giới hạn độ dài (gõ tắt của macOS chỉ tới 20 ký tự), tìm kiếm, nhập / xuất danh sách ra file.
 - Giá trị tự động, điền mỗi lần gõ: `{date}` (31/10/2026), `{time}` (14:05), `{weekday}` (Thứ Bảy), `{day}`, `{month}`, `{year}`, `{clipboard}` (nội dung đang sao chép). Ví dụ `nn` → `Hà Nội, ngày {day} tháng {month} năm {year}`. Bấm nút `{ }` cạnh ô nội dung để chèn.
 - Nhập file gõ tắt của UniKey (`ukmacro.txt`), EVKey (`evkmacro.txt`), OpenKey, hoặc các mục Thay thế văn bản của macOS (chọn các mục trong *System Settings → Keyboard → Text Replacements*, kéo ra Finder để có file `.plist`). File xuất ra dùng được với UniKey, EVKey và OpenKey.
-- Đồng bộ gõ tắt giữa các máy Mac: bật trong *Cài đặt → Gõ tắt → Đồng bộ*. ViKey lưu danh sách vào file `ViKey Macros.txt` trong iCloud Drive (hoặc thư mục bạn chọn, như Dropbox).
+- Đồng bộ gõ tắt giữa các máy Mac: bật trong *Cài đặt → Gõ tắt → Đồng bộ*. ViKey lưu danh sách vào file `ViKey Macros.json` trong iCloud Drive (hoặc thư mục bạn chọn, như Dropbox). Khi hai máy cùng sửa, ViKey gộp hai danh sách chứ không ghi đè.
 - Dùng gõ tắt cả khi tắt tiếng Việt, tự viết hoa theo phím tắt.
 - Gõ nhanh phụ âm đôi: cc → ch, gg → gi, kk → kh, nn → ng, qq → qu, pp → ph, tt → th.
 - Gõ tắt phụ âm đầu (f → ph, j → gi, w → qu) và phụ âm cuối (g → ng, h → nh, k → ch).

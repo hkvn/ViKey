@@ -18,15 +18,19 @@ struct MacroItem: Identifiable, Hashable {
 final class MacroModel: ObservableObject {
     @Published private(set) var macros: [MacroItem] = []
     @Published var search = ""
+    private(set) var texts = Set<String>()
 
     init() {
         reload()
+        //sync and import change the macros too
+        NotificationCenter.default.addObserver(self, selector: #selector(reload), name: .VKMacroStoreDidChange, object: nil)
     }
 
-    func reload() {
+    @objc func reload() {
         macros = VKMacroStore.allMacros()
             .map { MacroItem(text: $0.text, content: $0.content) }
             .sorted { $0.text.localizedStandardCompare($1.text) == .orderedAscending }
+        texts = Set(macros.map(\.text))
     }
 
     var shownMacros: [MacroItem] {
@@ -34,16 +38,15 @@ final class MacroModel: ObservableObject {
         return macros.filter { $0.text.localizedCaseInsensitiveContains(search) || $0.content.localizedCaseInsensitiveContains(search) }
     }
 
-    func save(text: String, content: String) {
+    /// false if the macro is too long for the saved data
+    func save(text: String, content: String) -> Bool {
         VKMacroStore.setMacro(text, content: content)
-        reload()
     }
 
     func delete(_ texts: Set<String>) {
         for text in texts {
             VKMacroStore.deleteMacro(text)
         }
-        reload()
     }
 
     func importFromFile() {
@@ -71,7 +74,6 @@ final class MacroModel: ObservableObject {
         let before = macros.count
         VKMacroStore.addMacros(entries.map { VKMacro(text: $0.text, content: $0.content) },
                                keepCurrent: answer == .alertFirstButtonReturn)
-        reload()
         VKLogger.log("imported \(entries.count) macros from \(url.lastPathComponent), \(before) -> \(macros.count)", category: "macro")
     }
 
@@ -114,7 +116,10 @@ struct MacroView: View {
     @State private var text = ""
     @State private var content = ""
 
+    @State private var tooLong = false
+
     var body: some View {
+        let shown = model.shownMacros
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundColor(.secondary)
@@ -124,7 +129,7 @@ struct MacroView: View {
             .padding(8)
             Divider()
 
-            Table(model.shownMacros, selection: $selection) {
+            Table(shown, selection: $selection) {
                 TableColumn("Từ gõ tắt", value: \.text)
                     .width(min: 80, ideal: 120, max: 240)
                 TableColumn("Nội dung", value: \.content)
@@ -154,10 +159,13 @@ struct MacroView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("Chèn giá trị tự động: ngày, giờ, clipboard,…")
-                Button(VKMacroStore.hasMacro(text) ? "Sửa" : "Thêm") {
-                    model.save(text: text, content: content)
-                    text = ""
-                    content = ""
+                Button(model.texts.contains(text) ? "Sửa" : "Thêm") {
+                    if model.save(text: text, content: content) {
+                        text = ""
+                        content = ""
+                    } else {
+                        tooLong = true
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(text.isEmpty || content.isEmpty)
@@ -166,7 +174,8 @@ struct MacroView: View {
 
             HStack {
                 Button {
-                    model.delete(selection)
+                    //only the rows on screen: the search may hide some selected ones
+                    model.delete(selection.intersection(shown.map(\.text)))
                     selection = []
                     text = ""
                     content = ""
@@ -189,6 +198,11 @@ struct MacroView: View {
             .padding([.horizontal, .bottom], 10)
         }
         .frame(minWidth: 520, minHeight: 400)
+        .alert("Từ gõ tắt quá dài", isPresented: $tooLong) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Từ gõ tắt tối đa 255 byte (khoảng 85 chữ có dấu), nội dung tối đa 65.535 byte.")
+        }
     }
 }
 
